@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Corredor Vial N°22 · Sector A</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/dark/main.css" />
+<style>
+  :root{
+    --bg:#0e1419; --panel:#141c23; --panel-2:#1a242d; --line:#253340; --line-2:#2f4050;
+    --text:#e6edf3; --muted:#8b9bab; --faint:#5d6d7c;
+    --accent:#f2b134; --accent-ink:#1b1405; --accent-soft:rgba(242,177,52,.14);
+    --ok:#4cc38a; --info:#4ea1ff;
+    --c-prog:#f2b134; --c-alc:#4ea1ff; --c-pte:#c084fc; --c-aux:#4cc38a; --c-acc:#2dd4bf;
+    --c-geo:#f87171; --c-sen:#facc15; --c-mej:#fb923c; --c-can:#a3a3a3; --c-lag:#38bdf8;
+    --r:10px; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif;overflow:hidden}
+  button{font:inherit;color:inherit}
+  .app{display:grid;grid-template-rows:56px 1fr;height:100%}
+  header{display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .mark{width:30px;height:30px;border-radius:7px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink);font-weight:600;font-size:13px;flex:none}
+  .ttl{display:flex;flex-direction:column;min-width:0}
+  .ttl h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ttl span{font-size:11.5px;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+  .hspace{flex:1}
+  .status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(76,195,138,.18)}
+  .btn{background:var(--panel-2);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12.5px}
+  .btn:hover{border-color:var(--accent)}
+  .body{display:grid;grid-template-columns:360px 1fr;min-height:0}
+  aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .sec h2{margin:0 0 10px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+  .tramo-card .big{font-size:22px;font-weight:600}
+  .tramo-card .rng{font-family:var(--mono);color:var(--accent);font-size:13px;margin-top:2px}
+  .search{display:flex;gap:6px}
+  .search input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit}
+  .search input:focus{outline:none;border-color:var(--accent)}
+  .hint{font-size:11.5px;color:var(--faint);margin-top:6px}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .kpi{display:flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 10px;cursor:pointer;text-align:left}
+  .kpi:hover{border-color:var(--line-2)}
+  .kpi.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .kpi.off{opacity:.38;cursor:default}
+  .kpi i{width:4px;align-self:stretch;border-radius:3px;flex:none}
+  .kpi b{display:block;font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+  .kpi small{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:70px}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;height:100%;justify-content:flex-end}
+  .bar div{width:100%;background:var(--line-2);border-radius:3px 3px 0 0;min-height:2px}
+  .bar.sel div{background:var(--accent)}
+  .bar span{font-size:10px;color:var(--faint);font-family:var(--mono)}
+  .bar em{font-style:normal;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .list{flex:1;overflow:auto;min-height:0;padding:6px 8px 12px}
+  .item{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .item:hover{background:var(--panel-2)}
+  .item.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .item .n{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .p{font-family:var(--mono);font-size:12px;color:var(--accent);text-align:right}
+  .item .s{grid-column:1/-1;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .empty{color:var(--faint);font-size:12.5px;padding:14px 10px}
+  main{position:relative;min-width:0;min-height:0}
+  #viewDiv{position:absolute;inset:0}
+  /* Franja de tramos */
+  .strip{position:absolute;top:12px;left:64px;right:300px;display:flex;gap:4px;overflow-x:auto;padding:4px;background:rgba(14,20,25,.82);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:12px;scrollbar-width:thin}
+  .tr{flex:1 0 64px;border:1px solid var(--line-2);background:var(--panel);border-radius:8px;padding:5px 6px;cursor:pointer;text-align:center;min-width:64px}
+  .tr b{display:block;font-size:13px}
+  .tr span{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap}
+  .tr:hover{border-color:var(--accent)}
+  .tr.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .tr.sel span{color:var(--accent-ink)}
+  .tr.all{flex:0 0 70px}
+  /* Panel ambiente */
+  .amb{position:absolute;top:12px;right:12px;width:272px;background:rgba(20,28,35,.94);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .amb h3{margin:0 0 10px;font-size:11px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;display:flex;justify-content:space-between;cursor:pointer}
+  .amb.min .ambb{display:none}
+  .amb.min h3{margin:0}
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:2px;margin-bottom:8px}
+  .seg button{border:0;background:none;padding:5px 0;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--muted)}
+  .seg button.on{background:var(--panel-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2)}
+  .row{display:grid;grid-template-columns:78px 1fr 40px;align-items:center;gap:8px;margin:7px 0;font-size:12.5px}
+  .row label{color:var(--muted)}
+  .row output{font-family:var(--mono);font-size:11.5px;text-align:right;color:var(--text)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .tog{display:flex;align-items:center;justify-content:space-between;margin-top:9px;font-size:12.5px;color:var(--muted)}
+  .sw{width:38px;height:22px;border-radius:11px;background:var(--line-2);border:0;position:relative;cursor:pointer;flex:none}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#cfd8e0;transition:left .15s}
+  .sw.on{background:var(--accent)}
+  .sw.on::after{left:19px;background:#fff}
+  /* Ficha */
+  .ficha{position:absolute;right:12px;bottom:24px;width:340px;max-height:58%;display:none;flex-direction:column;background:rgba(20,28,35,.97);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .ficha.show{display:flex}
+  .fh{padding:12px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:4px}
+  .fh h4{margin:0;font-size:15px;font-weight:600}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+  .badge i{width:8px;height:8px;border-radius:2px}
+  .loc{grid-column:1/-1;font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;align-self:start}
+  .fb{overflow:auto;padding:4px 0}
+  .fb table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .fb td{padding:5px 14px;border-bottom:1px solid rgba(37,51,64,.6);vertical-align:top}
+  .fb td:first-child{color:var(--muted);width:44%;word-break:break-word}
+  .fb td:last-child{font-variant-numeric:tabular-nums;word-break:break-word}
+  .ff{display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--line)}
+  /* Carga y diagnóstico */
+  .loading{position:absolute;inset:0;display:grid;place-items:center;background:rgba(14,20,25,.7);z-index:5;font-size:13px;color:var(--muted)}
+  .loading.hide{display:none}
+  .spin{width:28px;height:28px;border:3px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;margin:0 auto 10px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line-2);border-radius:12px;max-width:760px;width:92vw;max-height:80vh;padding:0}
+  dialog::backdrop{background:rgba(0,0,0,.55)}
+  .dh{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .db{padding:12px 16px;overflow:auto;max-height:66vh;font-size:12.5px}
+  .db table{width:100%;border-collapse:collapse}
+  .db th,.db td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .db th{color:var(--muted);font-weight:500;font-size:11.5px;text-transform:uppercase}
+  .db code{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .esri-ui-corner .esri-component{box-shadow:none}
+  @media (max-width:900px){
+    .body{grid-template-columns:1fr;grid-template-rows:1fr 44%}
+    aside{order:2;border-right:0;border-top:1px solid var(--line)}
+    .strip{right:12px;left:12px;top:12px}
+    .amb{top:auto;bottom:12px;right:12px;left:12px;width:auto}
+    .ficha{left:12px;right:12px;width:auto;bottom:auto;top:76px}
+    .status .lbl{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="mark">22</div>
+    <div class="ttl"><h1>Corredor Vial N°22: SECTOR A</h1><span>Dashboard BIM · Modelo 3D por tramos</span></div>
+    <div class="hspace"></div>
+    <div class="status"><span class="dot" id="stDot"></span><span class="lbl" id="stTxt">Conectando…</span></div>
+    <button class="btn" id="btnDiag" title="Capas y campos detectados">Capas</button>
+  </header>
+  <div class="body">
+    <aside>
+      <div class="sec tramo-card">
+        <h2>Ubicación actual</h2>
+        <div class="big" id="tNombre">Todo el corredor</div>
+        <div class="rng" id="tRango">—</div>
+      </div>
+      <div class="sec">
+        <h2>Ir a progresiva o buscar</h2>
+        <div class="search">
+          <input id="q" placeholder="Ej. 12+340  ·  ALC-05  ·  BM-03" autocomplete="off" />
+          <button class="btn" id="qGo">Ir</button>
+        </div>
+        <div class="hint" id="qHint">Progresiva (km+m) o texto de cualquier atributo.</div>
+      </div>
+      <div class="sec">
+        <h2>Elementos en el tramo</h2>
+        <div class="kpis" id="kpis"></div>
+      </div>
+      <div class="sec">
+        <h2><span id="chTitle">Distribución por tramo</span></h2>
+        <div class="bars" id="bars"></div>
+      </div>
+      <div class="sec" style="padding-bottom:6px;border-bottom:0">
+        <h2><span id="lTitle">Listado</span><span id="lCount" style="font-family:var(--mono)"></span></h2>
+      </div>
+      <div class="list" id="list"></div>
+    </aside>
+    <main>
+      <div id="viewDiv"></div>
+      <div class="strip" id="strip"></div>
+      <div class="amb" id="amb">
+        <h3 id="ambH"><span>Visualización</span><span id="ambT">–</span></h3>
+        <div class="ambb">
+          <div class="seg" id="seg">
+            <button data-m="dia" class="on">Día</button>
+            <button data-m="tarde">Tarde</button>
+            <button data-m="noche">Noche</button>
+          </div>
+          <div class="row"><label for="hora">Hora</label><input type="range" id="hora" min="0" max="23.75" step="0.25" value="12"><output id="horaO">12:00</output></div>
+          <div class="row"><label for="orto">Ortofoto</label><input type="range" id="orto" min="0" max="100" value="100"><output id="ortoO">100%</output></div>
+          <div class="row"><label for="terr">Terreno</label><input type="range" id="terr" min="0" max="100" value="100"><output id="terrO">100%</output></div>
+          <div class="row"><label for="mod">Modelos 3D</label><input type="range" id="mod" min="10" max="100" value="100"><output id="modO">100%</output></div>
+          <div class="tog"><span>Fondo blanco</span><button class="sw" id="blanco" aria-label="Fondo blanco"></button></div>
+          <div class="tog"><span>Sombras</span><button class="sw on" id="sombras" aria-label="Sombras"></button></div>
+        </div>
+      </div>
+      <div class="ficha" id="ficha">
+        <div class="fh">
+          <div><div class="badge" id="fCat"><i></i><span></span></div><h4 id="fNom"></h4></div>
+          <button class="x" id="fX" aria-label="Cerrar">×</button>
+          <div class="loc" id="fLoc"></div>
+        </div>
+        <div class="fb"><table id="fTab"></table></div>
+        <div class="ff"><button class="btn" id="fZoom">Acercar</button><button class="btn" id="fCopy">Copiar parámetros</button></div>
+      </div>
+      <div class="loading" id="loading"><div><div class="spin"></div><div id="loadTxt">Cargando escena…</div></div></div>
+    </main>
+  </div>
+</div>
+
+<dialog id="diag">
+  <div class="dh"><b>Capas detectadas en la escena</b><button class="btn" onclick="this.closest('dialog').close()">Cerrar</button></div>
+  <div class="db" id="diagBody"></div>
+</dialog>
+
+<script src="https://js.arcgis.com/4.31/"></script>
+<script>
+/* =================== CONFIGURACIÓN =================== */
+const CONFIG = {
+  PORTAL_URL: "https://consorciodga.maps.arcgis.com",
+  WEBSCENE_ID: "c6e3c462e1d1471eaf9b1a1e1cadb3ff",
+  // Opcional pero recomendado: Client ID de una "Aplicación" registrada en ArcGIS Online
+  // (con la URL de esta página como Redirect URI). Vacío = usa el diálogo de inicio de sesión estándar.
+  APP_ID: "",
+  // Si conoces los nombres exactos de campos, fíjalos aquí (si no, se detectan solos).
+  CAMPO_TRAMO: null,        // ej. "TRAMO"
+  CAMPO_PROGRESIVA: null,   // ej. "PROGRESIVA"
+  DIST_MAX_PROG: 3000,      // m: distancia máx. para asignar progresiva aproximada a un elemento
+  TIMEZONE_OFFSET: -5       // Perú
+};
+
+const CATS = [
+  {k:"prog", n:"Progresivas",       re:/PROGRES/i,                 c:"--c-prog"},
+  {k:"alc",  n:"Alcantarillas",     re:/ALCANTAR/i,                c:"--c-alc"},
+  {k:"pte",  n:"Puentes",           re:/PUENTE/i,                  c:"--c-pte"},
+  {k:"aux",  n:"Áreas auxiliares",  re:/AREAS?_?AUX|AUXILIAR/i,    c:"--c-aux", not:/ACCESO/i},
+  {k:"acc",  n:"Accesos a áreas",   re:/ACCESO/i,                  c:"--c-acc"},
+  {k:"geo",  n:"Puntos geodésicos", re:/GEOD/i,                    c:"--c-geo"},
+  {k:"sen",  n:"Señalización",      re:/SE[ÑN]AL/i,                c:"--c-sen"},
+  {k:"mej",  n:"Mejoramiento",      re:/MEJORAM/i,                 c:"--c-mej"},
+  {k:"can",  n:"Canteras",          re:/CANTERA/i,                 c:"--c-can"},
+  {k:"lag",  n:"Lagos",             re:/LAGO|LAGUNA/i,             c:"--c-lag"}
+];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+
+/* ---------- utilidades de tramo / progresiva ---------- */
+function tramosDeTitulo(t){
+  if(!t) return [];
+  const s = t.toUpperCase().replace(/Ñ/g,"N");
+  let m = s.match(/T?(\d{1,2})\s*[_\s-]*(?:AL|A)\s*[_\s-]*T?(\d{1,2})(?!\d)/);
+  if(m){ const a=+m[1], b=+m[2]; if(b>=a && b-a<40) return range(a,b); }
+  m = s.match(/T(\d{3,})(?!\d)/);                      // T123 -> 1,2,3
+  if(m && +m[1] > 40) return m[1].split("").map(Number).filter(n=>n>0);
+  m = s.match(/T(\d{1,2})[_\s-]+T(\d{1,2})(?!\d)/);      // T4_T6 -> 4..6
+  if(m){ const a=+m[1], b=+m[2]; if(b>=a) return range(a,b); }
+  m = s.match(/TRAMOS?\s*([\d\s,y\-]+)/);               // TRAMOS 1-2-3
+  if(m){ const ns=(m[1].match(/\d{1,2}/g)||[]).map(Number); if(ns.length) return ns; }
+  m = s.match(/(?:^|[^A-Z])T(?:RAMO)?[\s_-]*0?(\d{1,2})(?!\d)/);
+  if(m) return [+m[1]];
+  return [];
+}
+function range(a,b){ const r=[]; for(let i=a;i<=b;i++) r.push(i); return r; }
+function tramoDeValor(v){
+  if(v==null || v==="") return null;
+  if(typeof v==="number") return Number.isFinite(v) ? Math.round(v) : null;
+  const m = String(v).match(/\d{1,2}/); return m ? +m[0] : null;
+}
+function parseProg(v){
+  if(v==null || v==="") return null;
+  if(typeof v==="number") return v;
+  const s = String(v).replace(/\s/g,"").replace(/^KM/i,"");
+  let m = s.match(/(\d+)\+(\d+(?:[.,]\d+)?)/);
+  if(m) return (+m[1])*1000 + parseFloat(m[2].replace(",","."));
+  m = s.match(/^(\d+(?:[.,]\d+)?)$/);
+  return m ? parseFloat(m[1].replace(",",".")) : null;
+}
+function fmtProg(m){
+  if(m==null || !isFinite(m)) return "";
+  const km = Math.floor(m/1000), r = m - km*1000;
+  return km + "+" + r.toFixed(r%1 ? 2 : 0).padStart(r%1 ? 6 : 3,"0");
+}
+const NAME_RE = /^(NOMBRE|NAME|COD|CODIGO|ID_|DESCRIP|ETIQ|LABEL|DENOM|ESTRUCT|TIPO|OBRA|LAYER|REFNAME|TEXT)/i;
+const SKIP_RE = /^(SHAPE|OBJECTID|FID|GLOBALID|OID|ESRI_OID|CREATED_|LAST_EDITED|EDITOR|CREATOR)/i;
+
+/* =================== APP =================== */
+require([
+  "esri/config","esri/WebScene","esri/views/SceneView","esri/identity/OAuthInfo","esri/identity/IdentityManager",
+  "esri/widgets/Home","esri/widgets/DirectLineMeasurement3D","esri/widgets/Slice","esri/widgets/Expand",
+  "esri/core/reactiveUtils","esri/geometry/Extent","esri/layers/support/FeatureFilter"
+], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter) => {
+
+  esriConfig.portalUrl = CONFIG.PORTAL_URL;
+  if(CONFIG.APP_ID){
+    IdentityManager.registerOAuthInfos([new OAuthInfo({
+      appId: CONFIG.APP_ID, portalUrl: CONFIG.PORTAL_URL, popup: true,
+      popupCallbackUrl: new URL("oauth-callback.html", location.href).href
+    })]);
+  }
+
+  const scene = new WebScene({ portalItem: { id: CONFIG.WEBSCENE_ID, portal: { url: CONFIG.PORTAL_URL } } });
+  const view = new SceneView({
+    container: "viewDiv", map: scene, qualityProfile: "high",
+    popupEnabled: false,
+    environment: { atmosphereEnabled: true, starsEnabled: true }
+  });
+  window.__view = view;
+
+  const S = {
+    tramo: "ALL", cat: "alc", tramos: [], feats: [], byCat: {}, layers: [],
+    progPts: [], rangos: {}, sel: null, hl: null, orig: null, layerInfo: []
+  };
+
+  /* ---------- carga ---------- */
+  view.when(async () => {
+    setStatus(true, (IdentityManager.credentials[0]?.userId) || "Conectado");
+    S.orig = {
+      basemap: scene.basemap, bg: view.environment.background,
+      ground: scene.ground.surfaceColor, nav: scene.ground.navigationConstraint?.type || "stay-above"
+    };
+    view.ui.add(new Home({view}), "top-left");
+    view.ui.add(new Expand({view, content:new Measure({view}), expandTooltip:"Medir distancia", group:"tl"}), "top-left");
+    view.ui.add(new Expand({view, content:new Slice({view}), expandTooltip:"Corte / sección", group:"tl"}), "top-left");
+    initAmbiente();
+    $("loadTxt").textContent = "Leyendo capas y elementos…";
+    try { await analizar(); } catch(e){ console.error(e); }
+    $("loading").classList.add("hide");
+    const p = new URLSearchParams(location.search);
+    if(p.get("tramo")) setTramo(p.get("tramo"), true);
+    else renderAll();
+  }, err => {
+    console.error(err);
+    setStatus(false, "Sin acceso a la escena");
+    $("loadTxt").innerHTML = "No se pudo abrir la escena.<br><small>Inicia sesión con una cuenta de la organización <b>consorciodga</b> o revisa que la escena esté compartida contigo.</small>";
+  });
+
+  function setStatus(ok, t){ $("stDot").classList.toggle("on", ok); $("stTxt").textContent = t; }
+
+  function catDe(title){
+    const out = [];
+    for(const c of CATS){ if(c.re.test(title) && !(c.not && c.not.test(title))) out.push(c.k); }
+    return out;
+  }
+
+  async function queryAll(layer){
+    let src = layer;
+    if(layer.type === "scene" && layer.associatedLayer){ src = layer.associatedLayer; try{ await src.load(); }catch(e){ src = layer; } }
+    if(src.type === "feature" || src.type === "geojson" || src.type === "csv"){
+      await src.load();
+      const out = [], size = Math.min(src.maxRecordCount || 2000, 2000);
+      const paging = src.capabilities?.query?.supportsPagination;
+      for(let start=0; start<100000; start+=size){
+        const q = src.createQuery();
+        q.where = "1=1"; q.outFields = ["*"]; q.returnGeometry = true; q.outSpatialReference = view.spatialReference;
+        if(paging){ q.start = start; q.num = size; }
+        const r = await src.queryFeatures(q);
+        out.push(...r.features);
+        if(!paging || r.features.length < size) break;
+      }
+      return {features: out, fields: src.fields || [], oidField: src.objectIdField, src};
+    }
+    // Scene layer sin capa asociada: consulta lo cargado en la vista
+    const lv = await view.whenLayerView(layer);
+    await reactiveUtils.whenOnce(() => !lv.updating);
+    const q = lv.createQuery(); q.outFields = ["*"];
+    const r = await lv.queryFeatures(q);
+    return {features: r.features, fields: layer.fields || [], oidField: layer.objectIdField, src: layer};
+  }
+
+  function campo(fields, re, prefer){
+    if(prefer){ const f = fields.find(f => f.name.toUpperCase() === prefer.toUpperCase()); if(f) return f.name; }
+    const f = fields.find(f => re.test(f.name) || re.test(f.alias || "")); return f ? f.name : null;
+  }
+
+  function centro(g){
+    if(!g) return null;
+    if(g.type === "point") return {x:g.x, y:g.y};
+    const c = g.centroid || g.extent?.center; return c ? {x:c.x, y:c.y} : null;
+  }
+
+  async function analizar(){
+    const hojas = scene.allLayers.filter(l => !["group","elevation","integrated-mesh","imagery","imagery-tile","tile","vector-tile","web-tile","wms","wmts"].includes(l.type)).toArray();
+    const tramoSet = new Set();
+
+    for(const L of hojas){
+      // Títulos de la jerarquía (capa + grupos padres)
+      let titles = [L.title], p = L.parent;
+      while(p && p.title && p !== scene){ titles.push(p.title); p = p.parent; }
+      const full = titles.join(" / ");
+      const cats = catDe(full);
+      let tTit = tramosDeTitulo(L.title); if(!tTit.length) for(const t of titles.slice(1)){ tTit = tramosDeTitulo(t); if(tTit.length) break; }
+      tTit.forEach(t => tramoSet.add(t));
+      const info = {layer:L, title:L.title, path:full, type:L.type, cats, tramosTitulo:tTit, n:0, campos:[], fTramo:null, fProg:null, err:null};
+      S.layerInfo.push(info);
+      if(!cats.length) continue;
+      try{
+        const r = await queryAll(L);
+        info.n = r.features.length; info.campos = r.fields.map(f => f.name); info.oidField = r.oidField;
+        info.fTramo = campo(r.fields, /TRAMO/i, CONFIG.CAMPO_TRAMO);
+        info.fProg  = campo(r.fields, /PROG|^KM$|^PK$|PROGRES/i, CONFIG.CAMPO_PROGRESIVA);
+        const fNom  = r.fields.find(f => NAME_RE.test(f.name) && f.type === "string")?.name;
+        for(const g of r.features){
+          const a = g.attributes || {};
+          let cat = cats[0];
+          if(cats.includes("alc") && cats.includes("pte")){
+            const txt = Object.values(a).filter(v => typeof v === "string").join(" ");
+            cat = /PUENTE|PONT/i.test(txt) ? "pte" : "alc";
+          }
+          let pv = info.fProg ? parseProg(a[info.fProg]) : null;
+          if(pv == null && cat === "prog"){ for(const v of Object.values(a)){ if(typeof v==="string" && /\d+\s*\+\s*\d+/.test(v)){ pv = parseProg(v); break; } } }
+          let tr = info.fTramo ? tramoDeValor(a[info.fTramo]) : null;
+          const F = {
+            id: S.feats.length, cat, info, g, a, oid: a[r.oidField],
+            nombre: (fNom && a[fNom]) || a[info.fProg] || (CATS.find(c=>c.k===cat).n.replace(/s$/,"") + " " + (a[r.oidField] ?? "")),
+            tramos: tr != null ? [tr] : tTit.slice(), tramoFijo: tr != null,
+            prog: pv, progAprox: false, pt: centro(g.geometry)
+          };
+          if(tr != null) tramoSet.add(tr);
+          S.feats.push(F);
+          if(cat === "prog" && F.pt && pv != null) S.progPts.push(F);
+        }
+      }catch(e){ info.err = e.message || String(e); console.warn(L.title, e); }
+    }
+
+    // Asignación espacial: tramo y progresiva aproximada por la progresiva más cercana
+    for(const F of S.feats){
+      if(F.cat === "prog" || !F.pt || !S.progPts.length) continue;
+      let best = null, bd = Infinity;
+      for(const P of S.progPts){
+        if(F.tramos.length && P.tramos.length && !P.tramos.some(t => F.tramos.includes(t))) continue;
+        const d = (P.pt.x-F.pt.x)**2 + (P.pt.y-F.pt.y)**2; if(d < bd){ bd = d; best = P; }
+      }
+      if(best && Math.sqrt(bd) <= CONFIG.DIST_MAX_PROG){
+        if(F.prog == null){ F.prog = best.prog; F.progAprox = true; }
+        if(!F.tramoFijo && best.tramos.length === 1) F.tramos = best.tramos.slice();
+      }
+    }
+
+    S.tramos = [...tramoSet].filter(n => n > 0 && n < 100).sort((a,b) => a-b);
+    for(const t of S.tramos){
+      const ps = S.progPts.filter(P => P.tramos.length === 1 && P.tramos[0] === t).map(P => P.prog);
+      if(ps.length) S.rangos[t] = [Math.min(...ps), Math.max(...ps)];
+    }
+    for(const c of CATS) S.byCat[c.k] = S.feats.filter(F => F.cat === c.k);
+    if(!S.byCat[S.cat].length) S.cat = (CATS.find(c => S.byCat[c.k].length) || CATS[0]).k;
+    renderStrip(); renderDiag();
+  }
+
+  /* ---------- filtros ---------- */
+  const enTramo = F => S.tramo === "ALL" || F.tramos.includes(+S.tramo);
+
+  async function setTramo(t, fly){
+    S.tramo = String(t);
+    renderAll();
+    await aplicarFiltro();
+    if(fly) volarTramo();
+  }
+
+  async function aplicarFiltro(){
+    for(const info of S.layerInfo){
+      const L = info.layer;
+      if(info._vis === undefined) info._vis = L.visible;
+      if(!info.cats.length) continue;
+      if(S.tramo === "ALL"){
+        L.visible = info._vis;
+        try{ const lv = await view.whenLayerView(L); lv.filter = null; }catch(e){}
+        continue;
+      }
+      const t = +S.tramo;
+      const fs = S.feats.filter(F => F.info === info);
+      const dentro = fs.filter(F => F.tramos.includes(t));
+      const tocaTitulo = !info.tramosTitulo.length || info.tramosTitulo.includes(t);
+      L.visible = info._vis && (tocaTitulo || dentro.length > 0);
+      if(!L.visible) continue;
+      try{
+        const lv = await view.whenLayerView(L);
+        if(fs.length && dentro.length < fs.length && dentro.every(F => F.oid != null)){
+          lv.filter = new FeatureFilter({ objectIds: dentro.map(F => F.oid) });
+        } else lv.filter = null;
+      }catch(e){}
+    }
+  }
+
+  function extentDe(lista){
+    const pts = lista.map(F => F.g.geometry).filter(Boolean);
+    if(!pts.length) return null;
+    let ext = null;
+    for(const g of pts){
+      const e = g.type === "point" ? new Extent({xmin:g.x-1,ymin:g.y-1,xmax:g.x+1,ymax:g.y+1,spatialReference:g.spatialReference}) : g.extent;
+      if(!e) continue; ext = ext ? ext.union(e) : e.clone();
+    }
+    return ext;
+  }
+  function volarTramo(){
+    const lista = S.tramo === "ALL" ? S.feats : S.feats.filter(enTramo);
+    const ext = extentDe(lista);
+    if(ext) view.goTo({target: ext.expand(1.25), tilt: 50}, {duration: 1600}).catch(()=>{});
+  }
+
+  /* ---------- render ---------- */
+  function renderAll(){ renderStrip(); renderTramoCard(); renderKpis(); renderBars(); renderList(); }
+
+  function renderStrip(){
+    const el = $("strip");
+    let h = `<button class="tr all ${S.tramo==="ALL"?"sel":""}" data-t="ALL"><b>Todos</b><span>${S.tramos.length} tramos</span></button>`;
+    for(const t of S.tramos){
+      const r = S.rangos[t];
+      h += `<button class="tr ${S.tramo==String(t)?"sel":""}" data-t="${t}" title="Tramo ${t}${r?" · "+fmtProg(r[0])+" – "+fmtProg(r[1]):""}"><b>T${t}</b><span>${r?fmtProg(r[0]):"&nbsp;"}</span></button>`;
+    }
+    el.innerHTML = h;
+    el.querySelectorAll(".tr").forEach(b => b.onclick = () => setTramo(b.dataset.t, true));
+    el.querySelector(".tr.sel")?.scrollIntoView({block:"nearest", inline:"center"});
+  }
+
+  function renderTramoCard(){
+    if(S.tramo === "ALL"){
+      $("tNombre").textContent = "Todo el corredor";
+      const all = Object.values(S.rangos).flat();
+      $("tRango").textContent = all.length ? `Km ${fmtProg(Math.min(...all))} – ${fmtProg(Math.max(...all))}` : `${S.tramos.length} tramos`;
+    } else {
+      const r = S.rangos[+S.tramo];
+      $("tNombre").textContent = "Tramo " + S.tramo;
+      $("tRango").textContent = r ? `Km ${fmtProg(r[0])} – ${fmtProg(r[1])}  ·  ${((r[1]-r[0])/1000).toFixed(2)} km` : "Rango de progresivas no disponible";
+    }
+  }
+
+  function renderKpis(){
+    $("kpis").innerHTML = CATS.map(c => {
+      const tot = S.byCat[c.k]?.length || 0, n = (S.byCat[c.k]||[]).filter(enTramo).length;
+      return `<button class="kpi ${S.cat===c.k?"sel":""} ${tot?"":"off"}" data-k="${c.k}"><i style="background:var(${c.c})"></i><span><b>${n}</b><small>${c.n}</small></span></button>`;
+    }).join("");
+    $("kpis").querySelectorAll(".kpi").forEach(b => b.onclick = () => {
+      if(b.classList.contains("off")) return;
+      S.cat = b.dataset.k; renderKpis(); renderBars(); renderList();
+    });
+  }
+
+  function renderBars(){
+    const c = CATS.find(c => c.k === S.cat);
+    $("chTitle").textContent = c.n + " por tramo";
+    const data = S.tramos.map(t => ({t, n: S.byCat[S.cat].filter(F => F.tramos.includes(t)).length}));
+    const max = Math.max(1, ...data.map(d => d.n));
+    $("bars").innerHTML = data.map(d =>
+      `<div class="bar ${S.tramo==String(d.t)?"sel":""}" data-t="${d.t}" title="Tramo ${d.t}: ${d.n}"><em>${d.n||""}</em><div style="height:${(d.n/max)*52}px"></div><span>${d.t}</span></div>`).join("");
+    $("bars").querySelectorAll(".bar").forEach(b => b.onclick = () => setTramo(b.dataset.t, true));
+  }
+
+  function renderList(){
+    const c = CATS.find(c => c.k === S.cat);
+    const lista = S.byCat[S.cat].filter(enTramo).sort((a,b) => (a.prog??1e12) - (b.prog??1e12));
+    $("lTitle").textContent = c.n + (S.tramo==="ALL" ? "" : " · Tramo " + S.tramo);
+    $("lCount").textContent = lista.length;
+    if(!lista.length){ $("list").innerHTML = `<div class="empty">Sin ${c.n.toLowerCase()} en esta selección.</div>`; return; }
+    $("list").innerHTML = lista.slice(0, 600).map(F => `
+      <div class="item ${S.sel===F?"sel":""}" data-id="${F.id}">
+        <span class="n">${esc(F.nombre)}</span>
+        <span class="p">${F.prog!=null ? (F.progAprox?"≈ ":"") + fmtProg(F.prog) : ""}</span>
+        <span class="s">${F.tramos.length ? "Tramo " + F.tramos.join(", ") : "Tramo s/d"} · ${esc(F.info.title)}</span>
+      </div>`).join("") + (lista.length > 600 ? `<div class="empty">Mostrando 600 de ${lista.length}. Usa la búsqueda.</div>` : "");
+    $("list").querySelectorAll(".item").forEach(d => d.onclick = () => seleccionar(S.feats[+d.dataset.id], true));
+  }
+
+  /* ---------- selección y ficha ---------- */
+  async function seleccionar(F, fly){
+    S.sel = F;
+    S.hl?.remove(); S.hl = null;
+    try{ const lv = await view.whenLayerView(F.info.layer); if(F.oid != null) S.hl = lv.highlight(F.oid); }catch(e){}
+    if(S.cat !== F.cat){ S.cat = F.cat; renderKpis(); renderBars(); }
+    renderList();
+    document.querySelector(`.item[data-id="${F.id}"]`)?.scrollIntoView({block:"nearest"});
+    renderFicha(F);
+    if(fly) zoomA(F);
+  }
+  function zoomA(F){
+    const g = F.g.geometry; if(!g) return;
+    const tgt = g.type === "point" ? {target: g, zoom: 18, tilt: 60} : {target: g.extent ? g.extent.clone().expand(2.2) : g, tilt: 60};
+    view.goTo(tgt, {duration: 1300}).catch(()=>{});
+  }
+  function fmtVal(v, f){
+    if(v == null || v === "") return "<span style='color:var(--faint)'>—</span>";
+    if(f?.type === "date" || (typeof v === "number" && /FECHA|DATE/i.test(f?.name||""))) { const d = new Date(v); if(!isNaN(d)) return d.toLocaleDateString("es-PE"); }
+    if(typeof v === "number") return Number.isInteger(v) ? v.toLocaleString("es-PE") : v.toLocaleString("es-PE",{maximumFractionDigits:3});
+    return esc(v);
+  }
+  function renderFicha(F){
+    const c = CATS.find(c => c.k === F.cat);
+    $("fCat").querySelector("i").style.background = `var(${c.c})`;
+    $("fCat").querySelector("span").textContent = c.n.replace(/s$/,"") + " · " + F.info.title;
+    $("fNom").textContent = F.nombre;
+    $("fLoc").textContent = (F.tramos.length ? "Tramo " + F.tramos.join(", ") : "Tramo s/d") + (F.prog != null ? "  ·  Km " + (F.progAprox?"≈ ":"") + fmtProg(F.prog) : "");
+    const fields = F.info.layer.fields || F.info.layer.associatedLayer?.fields || [];
+    const rows = Object.entries(F.a).filter(([k]) => !SKIP_RE.test(k)).map(([k,v]) => {
+      const f = fields.find(x => x.name === k);
+      return `<tr><td>${esc(f?.alias || k)}</td><td>${fmtVal(v, f)}</td></tr>`;
+    });
+    $("fTab").innerHTML = rows.join("") || "<tr><td colspan=2>Sin atributos</td></tr>";
+    $("ficha").classList.add("show");
+  }
+  $("fX").onclick = () => { $("ficha").classList.remove("show"); S.hl?.remove(); S.sel = null; renderList(); };
+  $("fZoom").onclick = () => S.sel && zoomA(S.sel);
+  $("fCopy").onclick = () => {
+    if(!S.sel) return;
+    const txt = [S.sel.nombre, $("fLoc").textContent, ...[...$("fTab").rows].map(r => r.cells[0].innerText + "\t" + r.cells[1].innerText)].join("\n");
+    navigator.clipboard?.writeText(txt); $("fCopy").textContent = "Copiado"; setTimeout(() => $("fCopy").textContent = "Copiar parámetros", 1200);
+  };
+
+  view.on("click", async ev => {
+    const r = await view.hitTest(ev);
+    for(const h of r.results){
+      const g = h.graphic; if(!g?.layer) continue;
+      const info = S.layerInfo.find(i => i.layer === g.layer || i.layer.associatedLayer === g.layer);
+      if(!info) continue;
+      const oid = g.attributes?.[info.oidField] ?? g.getObjectId?.();
+      const F = S.feats.find(F => F.info === info && F.oid === oid);
+      if(F){ seleccionar(F, false); return; }
+    }
+  });
+
+  /* ---------- búsqueda ---------- */
+  function buscar(){
+    const q = $("q").value.trim(); if(!q) return;
+    const pv = /^\s*(km)?\s*\d+\s*\+\s*\d+/i.test(q) || /^\d+(\.\d+)?$/.test(q) ? parseProg(q) : null;
+    if(pv != null && S.progPts.length){
+      const cand = S.progPts.filter(enTramo);
+      const P = (cand.length ? cand : S.progPts).reduce((a,b) => Math.abs(b.prog-pv) < Math.abs(a.prog-pv) ? b : a);
+      $("qHint").textContent = `Progresiva más cercana: ${fmtProg(P.prog)} (Tramo ${P.tramos.join(", ")})`;
+      if(P.tramos.length === 1 && S.tramo !== "ALL" && S.tramo != P.tramos[0]) setTramo(P.tramos[0], false);
+      seleccionar(P, true); return;
+    }
+    const ql = q.toLowerCase();
+    const hits = S.feats.filter(F => String(F.nombre).toLowerCase().includes(ql) || Object.values(F.a).some(v => v != null && String(v).toLowerCase().includes(ql)));
+    $("qHint").textContent = hits.length ? `${hits.length} coincidencia(s). Mostrando la primera.` : "Sin coincidencias.";
+    if(hits.length){ if(!enTramo(hits[0])) { S.tramo = "ALL"; renderAll(); aplicarFiltro(); } seleccionar(hits[0], true); }
+  }
+  $("qGo").onclick = buscar;
+  $("q").addEventListener("keydown", e => { if(e.key === "Enter") buscar(); });
+
+  /* ---------- ambiente: día/noche, ortofoto, terreno, fondo blanco ---------- */
+  function initAmbiente(){
+    const fechaHora = h => {
+      const d = new Date(), H = Math.floor(h), M = Math.round((h - H) * 60);
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), H - CONFIG.TIMEZONE_OFFSET, M));
+    };
+    const hhmm = h => String(Math.floor(h)).padStart(2,"0") + ":" + String(Math.round((h%1)*60)).padStart(2,"0");
+    const setHora = h => {
+      $("hora").value = h; $("horaO").textContent = hhmm(h); $("ambT").textContent = hhmm(h);
+      view.environment.lighting = { type: "sun", date: fechaHora(h), directShadowsEnabled: $("sombras").classList.contains("on"), displayUTCOffset: CONFIG.TIMEZONE_OFFSET };
+      const m = h >= 6.5 && h < 16 ? "dia" : h >= 16 && h < 18.75 ? "tarde" : "noche";
+      $("seg").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
+    };
+    const presets = {dia: 12, tarde: 17.5, noche: 21};
+    $("seg").querySelectorAll("button").forEach(b => b.onclick = () => setHora(presets[b.dataset.m]));
+    $("hora").oninput = e => setHora(+e.target.value);
+    $("sombras").onclick = e => { e.currentTarget.classList.toggle("on"); setHora(+$("hora").value); };
+    setHora(12);
+
+    // Ortofoto: capas base del mapa base + cualquier capa raster operativa (ortofoto, dron, imagen)
+    const rasters = () => {
+      const base = scene.basemap ? [...scene.basemap.baseLayers.toArray()] : [];
+      const ops = scene.allLayers.filter(l => ["imagery","imagery-tile","tile","web-tile","wmts","wms"].includes(l.type) || /ORTO|DRON|IMAGEN|MOSAIC|RASTER/i.test(l.title||"")).toArray();
+      return [...base, ...ops];
+    };
+    $("orto").oninput = e => { const v = +e.target.value; $("ortoO").textContent = v + "%"; rasters().forEach(l => l.opacity = v/100); };
+    $("terr").oninput = e => {
+      const v = +e.target.value; $("terrO").textContent = v + "%";
+      scene.ground.opacity = v/100;
+      scene.ground.navigationConstraint = { type: v < 100 ? "none" : S.orig.nav };
+    };
+    $("mod").oninput = e => {
+      const v = +e.target.value; $("modO").textContent = v + "%";
+      scene.allLayers.forEach(l => { if(["scene","building-scene","integrated-mesh"].includes(l.type)) l.opacity = v/100; });
+    };
+    $("blanco").onclick = e => {
+      const on = !e.currentTarget.classList.contains("on");
+      e.currentTarget.classList.toggle("on", on);
+      if(on){
+        scene.basemap = null;
+        scene.ground.surfaceColor = "#ffffff";
+        view.environment.background = { type: "color", color: [255,255,255,1] };
+        view.environment.atmosphereEnabled = false; view.environment.starsEnabled = false;
+      } else {
+        scene.basemap = S.orig.basemap;
+        scene.ground.surfaceColor = S.orig.ground;
+        view.environment.background = S.orig.bg;
+        view.environment.atmosphereEnabled = true; view.environment.starsEnabled = true;
+        $("orto").dispatchEvent(new Event("input"));
+      }
+    };
+    $("ambH").onclick = () => $("amb").classList.toggle("min");
+  }
+
+  /* ---------- diagnóstico ---------- */
+  function renderDiag(){
+    $("diagBody").innerHTML = `<p style="color:var(--muted);margin-top:0">Así se interpretó cada capa de la escena. Si algún tramo o progresiva no se reconoce, fija <code>CAMPO_TRAMO</code> / <code>CAMPO_PROGRESIVA</code> en la configuración.</p>
+      <table><tr><th>Capa</th><th>Categoría</th><th>Tramos (título)</th><th>Elem.</th><th>Campo tramo / prog.</th></tr>` +
+      S.layerInfo.map(i => `<tr><td>${esc(i.path)}<br><code>${i.type}</code>${i.err?`<br><span style="color:#f87171">${esc(i.err)}</span>`:""}</td>
+        <td>${i.cats.map(k => CATS.find(c=>c.k===k).n).join(" + ") || "<span style='color:var(--faint)'>—</span>"}</td>
+        <td>${i.tramosTitulo.join(", ") || "—"}</td><td>${i.n || ""}</td>
+        <td><code>${i.fTramo || "—"} / ${i.fProg || "—"}</code></td></tr>`).join("") + `</table>`;
+  }
+  $("btnDiag").onclick = () => $("diag").showModal();
+});
+</script>
+</body>
+</html>
