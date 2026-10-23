@@ -245,7 +245,12 @@ const CONFIG = {
   CAMPO_PROGRESIVA: null,   // ej. "PROGRESIVA"
   DIST_MAX_PROG: 3000,      // m
   TIMEZONE_OFFSET: -5,
-  CAPAS_APAGADAS: /LAGO|LAGUNA/i   // capas fuera del alcance vial: se apagan al iniciar
+  CAPAS_APAGADAS: /LAGO|LAGUNA/i,  // capas fuera del alcance vial: se apagan al iniciar
+  // Modelos 3D de Civil 3D: cada estructura suele estar formada por varios sólidos (cabezal, tubo, aletas…).
+  // Los sólidos de la misma clase a menos de esta distancia (m) se cuentan como UNA estructura. 0 = no agrupar.
+  AGRUPAR_M: { alc: 25, pte: 60, sen: 3 },
+  // Texto que identifica un puente dentro de los atributos (p. ej. el nombre de capa CAD)
+  PATRON_PUENTE: /PUENTE|PONT|BRIDGE|PTE[\s_-]/i
 };
 
 const CATS = [
@@ -305,14 +310,15 @@ function fmtProg(m){
   return km + "+" + r.toFixed(r%1 ? 2 : 0).padStart(r%1 ? 6 : 3,"0");
 }
 const NAME_RE = /^(NOMBRE|NAME|COD|CODIGO|ID_|DESCRIP|ETIQ|LABEL|DENOM|ESTRUCT|TIPO|OBRA|LAYER|REFNAME|TEXT)/i;
-const SKIP_RE = /^(SHAPE|OBJECTID|FID|GLOBALID|OID|ESRI_OID|CREATED_|LAST_EDITED|EDITOR|CREATOR)/i;
+const SKIP_RE = /^(__|SHAPE|OBJECTID|FID|GLOBALID|OID|ESRI_OID|CREATED_|LAST_EDITED|EDITOR|CREATOR)/i;
 const NO_HOJA = ["group","elevation","integrated-mesh","imagery","imagery-tile","tile","vector-tile","web-tile","wms","wmts","base-elevation","base-tile"];
 
 require([
   "esri/config","esri/WebScene","esri/views/SceneView","esri/identity/OAuthInfo","esri/identity/IdentityManager",
   "esri/widgets/Home","esri/widgets/DirectLineMeasurement3D","esri/widgets/Slice","esri/widgets/Expand",
-  "esri/core/reactiveUtils","esri/geometry/Extent","esri/layers/support/FeatureFilter"
-], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter) => {
+  "esri/core/reactiveUtils","esri/geometry/Extent","esri/layers/support/FeatureFilter",
+  "esri/request","esri/geometry/Point","esri/geometry/projection"
+], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter, esriRequest, Point, projection) => {
 
   esriConfig.portalUrl = CONFIG.PORTAL_URL;
   if(CONFIG.APP_ID){
@@ -387,12 +393,133 @@ require([
       return out;
     }
     if(L.type === "scene"){
+      try{
+        const gs = await leerI3S(info);
+        if(gs.length) return agruparEstructuras(info, gs);
+      }catch(e){ console.warn("I3S", info.title, e); info.err = "Lectura completa no disponible: " + (e.message||e); }
       info.modo = "modelo 3D (lectura en pantalla)"; info.viva = true;
       return leerVista(info);
     }
     info.modo = "sin consulta (" + L.type + ")";
     return [];
   }
+  /* ---------- Lectura completa de un modelo 3D (I3S): recorre los nodos hoja y lee OID + textos ---------- */
+  async function leerI3S(info){
+    const L = info.layer;
+    const base = String(L.parsedUrl?.path || L.url).replace(/\/$/,"") + "/layers/" + (L.layerId ?? 0);
+    const J = async u => (await esriRequest(u, {query:{f:"json"}, responseType:"json"})).data;
+    const meta = await J(base);
+    const asi = meta.attributeStorageInfo || [];
+    const oidName = (meta.fields || []).find(f => f.type === "esriFieldTypeOID")?.name || L.objectIdField;
+    const oidS = asi.find(a => a.name === oidName);
+    if(!meta.nodePages || !oidS) throw new Error("el servicio no expone nodePages/OID");
+    const pri = n => /LAYER|CAPA|NAME|NOMBRE|TIPO|DESC|ESTRUC|OBRA|COD/i.test(n) ? 0 : 1;
+    const strS = asi.filter(a => a.attributeValues?.valueType === "String").sort((x,y) => pri(x.name) - pri(y.name)).slice(0, 6);
+    info.oidField = oidName;
+    const per = meta.nodePages.nodesPerPage || 64, nodes = [];
+    for(let p = 0; p < 5000; p++){
+      let pg; try{ pg = await J(`${base}/nodepages/${p}`); }catch(e){ if(p === 0) throw e; break; }
+      const ns = pg.nodes || []; nodes.push(...ns);
+      if(ns.length < per) break;
+    }
+    const hojas = nodes.filter(n => n.mesh?.attribute && !(n.children && n.children.length));
+    const bin = async u => new DataView((await esriRequest(u, {responseType:"array-buffer"})).data);
+    const oids = (dv, s) => {
+      const n = dv.getUint32(0, true), big = /64/.test(s.attributeValues.valueType);
+      let off = (s.header?.length || 1) * 4; if(big) off = Math.ceil(off/8)*8;
+      const out = []; for(let i = 0; i < n; i++) out.push(big ? dv.getUint32(off + i*8, true) : dv.getUint32(off + i*4, true));
+      return out;
+    };
+    const dec = new TextDecoder("utf-8");
+    const textos = (dv, s) => {
+      const n = dv.getUint32(0, true); const off = (s.header?.length || 2) * 4;
+      const out = []; let pos = off + n*4;
+      for(let i = 0; i < n; i++){
+        const len = dv.getUint32(off + i*4, true);
+        let b = new Uint8Array(dv.buffer, dv.byteOffset + pos, len); if(len && b[len-1] === 0) b = b.subarray(0, len-1);
+        out.push(dec.decode(b)); pos += len;
+      }
+      return out;
+    };
+    const reg = new Map(); let k = 0, hechos = 0;
+    const worker = async () => {
+      while(k < hojas.length){
+        const nd = hojas[k++], res = nd.mesh.attribute.resource;
+        try{
+          const ids = oids(await bin(`${base}/nodes/${res}/attributes/${oidS.key}/0`), oidS);
+          const tx = {};
+          for(const s of strS){ try{ tx[s.name] = textos(await bin(`${base}/nodes/${res}/attributes/${s.key}/0`), s); }catch(e){} }
+          const c = nd.obb?.center || nd.mbs;
+          ids.forEach((o, i) => {
+            let r = reg.get(o);
+            if(!r){ r = {a:{[oidName]: o}, c:[]}; for(const nm in tx) r.a[nm] = tx[nm][i]; reg.set(o, r); }
+            if(c) r.c.push(c);
+          });
+        }catch(e){}
+        if(++hechos % 20 === 0) $("loadTxt").textContent = `Leyendo modelo 3D «${info.title}»: ${hechos}/${hojas.length} nodos…`;
+      }
+    };
+    await Promise.all(range(1, 8).map(worker));
+    const sr = meta.spatialReference || L.spatialReference;
+    const proyectar = !(sr?.wkid && view.spatialReference.wkid === sr.wkid) && !(sr?.latestWkid && sr.latestWkid === view.spatialReference.latestWkid);
+    if(proyectar) await projection.load();
+    const out = [];
+    for(const r of reg.values()){
+      if(!r.c.length){ out.push({attributes:r.a, geometry:null}); continue; }
+      const m = [0,1,2].map(j => r.c.reduce((s,v) => s + (v[j]||0), 0) / r.c.length);
+      let pt = new Point({x:m[0], y:m[1], z:m[2], spatialReference: sr});
+      if(proyectar){ try{ pt = projection.project(pt, view.spatialReference) || pt; }catch(e){} }
+      out.push({attributes:r.a, geometry:pt});
+    }
+    info.modo = `modelo 3D completo (${hojas.length} nodos, ${out.length} sólidos)`;
+    info.solidos = out.length;
+    return out;
+  }
+
+  // Agrupa sólidos cercanos de la misma clase en una sola estructura (alcantarilla, puente, señal)
+  function claseDe(info, a){
+    if(info.cats.includes("alc") && info.cats.includes("pte"))
+      return Object.values(a).some(v => typeof v === "string" && CONFIG.PATRON_PUENTE.test(v)) ? "pte" : "alc";
+    return info.cats[0];
+  }
+  function agruparEstructuras(info, gs){
+    const oidName = info.oidField;
+    const porClase = {};
+    gs.forEach(g => (porClase[claseDe(info, g.attributes)] ||= []).push(g));
+    const out = [];
+    for(const [cl, lista] of Object.entries(porClase)){
+      const r = CONFIG.AGRUPAR_M?.[cl] || 0;
+      if(!r){ lista.forEach(g => { g.attributes.__clase = cl; out.push(g); }); continue; }
+      const usado = new Array(lista.length).fill(false);
+      for(let i = 0; i < lista.length; i++){
+        if(usado[i]) continue;
+        usado[i] = true; const grupo = [lista[i]], cola = [lista[i]];
+        while(cola.length){
+          const p = cola.pop().geometry; if(!p) continue;
+          for(let j = 0; j < lista.length; j++){
+            if(usado[j]) continue; const q = lista[j].geometry; if(!q) continue;
+            if((p.x-q.x)**2 + (p.y-q.y)**2 <= r*r){ usado[j] = true; grupo.push(lista[j]); cola.push(lista[j]); }
+          }
+        }
+        const a = { ...grupo[0].attributes, __clase: cl, __oids: grupo.map(g => g.attributes[oidName]) };
+        if(grupo.length > 1){
+          a["Sólidos que la componen"] = grupo.length;
+          for(const k of Object.keys(grupo[0].attributes)){
+            if(k === oidName || typeof grupo[0].attributes[k] !== "string") continue;
+            const vs = [...new Set(grupo.map(g => g.attributes[k]).filter(Boolean))];
+            if(vs.length > 1) a[k] = vs.slice(0, 5).join(" · ") + (vs.length > 5 ? ` (+${vs.length-5})` : "");
+          }
+        }
+        const pts = grupo.map(g => g.geometry).filter(Boolean);
+        const geom = pts.length ? new Point({ x: pts.reduce((s,p)=>s+p.x,0)/pts.length, y: pts.reduce((s,p)=>s+p.y,0)/pts.length,
+                                             z: pts.reduce((s,p)=>s+(p.z||0),0)/pts.length, spatialReference: pts[0].spatialReference }) : null;
+        out.push({attributes:a, geometry:geom});
+      }
+    }
+    info.estructuras = out.length;
+    return out;
+  }
+
   async function leerVista(info){
     try{
       const lv = await view.whenLayerView(info.layer);
@@ -417,11 +544,7 @@ require([
     const key = info.idx + ":" + (oid ?? JSON.stringify(a));
     if(S.keys.has(key)) return null;
     S.keys.add(key);
-    let cat = info.cats[0];
-    if(info.cats.includes("alc") && info.cats.includes("pte")){
-      const txt = Object.values(a).filter(v => typeof v === "string").join(" ");
-      cat = /PUENTE|PONT/i.test(txt) ? "pte" : "alc";
-    }
+    const cat = a.__clase || claseDe(info, a);
     let pv = info.fProg ? parseProg(a[info.fProg]) : null;
     if(pv == null && cat === "prog"){
       for(const v of Object.values(a)){ if(typeof v === "string" && /\d+\s*\+\s*\d+/.test(v)){ pv = parseProg(v); break; } }
@@ -433,7 +556,7 @@ require([
       for(const v of vals){ const t = tramoEnTexto(v); if(t != null && t > 0 && (!info.tTit.length || info.tTit.includes(t))){ tr = t; break; } }
     }
     const F = {
-      id: S.feats.length, cat, info, g, a, oid,
+      id: S.feats.length, cat, info, g, a, oid, oids: a.__oids || (oid != null ? [oid] : []),
       nombre: (info.fNom && a[info.fNom]) || (info.fProg && a[info.fProg]) || (catN(cat).n.replace(/s$/,"") + " " + (oid ?? S.feats.length)),
       tramos: tr != null ? [tr] : info.tTit.slice(), tramoFijo: tr != null,
       prog: pv, progAprox: false, pt: centro(g.geometry)
@@ -441,6 +564,13 @@ require([
     S.feats.push(F);
     if(cat === "prog" && F.pt && pv != null) S.progPts.push(F);
     return F;
+  }
+
+  function nombresUnicos(lista){
+    const cuenta = {}; lista.forEach(F => cuenta[F.cat + "|" + F.nombre] = (cuenta[F.cat + "|" + F.nombre] || 0) + 1);
+    const n = {};
+    lista.filter(F => cuenta[F.cat + "|" + F.nombre] > 1).sort((a,b) => (a.pt?.x ?? 0) - (b.pt?.x ?? 0))
+      .forEach(F => { const k = F.cat + "|" + F.nombre; n[k] = (n[k] || 0) + 1; F.nombre = `${catN(F.cat).n.replace(/s$/,"")} ${String(n[k]).padStart(2,"0")} · ${F.nombre}`; });
   }
 
   function asignarEspacial(lista){
@@ -496,7 +626,8 @@ require([
         info.fProg  = campo(info.fields, /PROG|^KM$|^PK$/i, CONFIG.CAMPO_PROGRESIVA);
         info.fNom   = info.fields.find(f => NAME_RE.test(f.name) && f.type === "string")?.name
                    || info.fields.find(f => f.type === "string" && !SKIP_RE.test(f.name))?.name;
-        fs.forEach(g => agregar(info, g));
+        const nuevos = fs.map(g => agregar(info, g)).filter(Boolean);
+        nombresUnicos(nuevos);
       }catch(e){ info.err = e.message || String(e); console.warn(info.title, e); }
     }));
     asignarEspacial(S.feats);
@@ -548,8 +679,8 @@ require([
       try{
         const lv = await view.whenLayerView(L);
         const asignados = fs.filter(F => F.tramos.length === 1);
-        lv.filter = (asignados.length && dentro.length < fs.length && dentro.every(F => F.oid != null) && !info.viva)
-          ? new FeatureFilter({ objectIds: dentro.map(F => F.oid) }) : null;
+        lv.filter = (asignados.length && dentro.length < fs.length && dentro.every(F => F.oids.length) && !info.viva)
+          ? new FeatureFilter({ objectIds: dentro.flatMap(F => F.oids) }) : null;
       }catch(e){}
     }
   }
@@ -704,7 +835,7 @@ require([
     S.sel = F;
     S.hl?.remove(); S.hl = null;
     encender(F.info.layer, true);
-    try{ const lv = await view.whenLayerView(F.info.layer); if(F.oid != null) S.hl = lv.highlight(F.oid); }catch(e){}
+    try{ const lv = await view.whenLayerView(F.info.layer); if(F.oids.length) S.hl = lv.highlight(F.oids); }catch(e){}
     if(S.cat !== F.cat){ S.cat = F.cat; renderKpis(); renderBars(); }
     renderList();
     document.querySelector(`.item[data-id="${F.id}"]`)?.scrollIntoView({block:"nearest"});
@@ -714,7 +845,7 @@ require([
   function zoomA(F){
     const g = F.g.geometry;
     if(!g){ if(F.info.layer.fullExtent) view.goTo(F.info.layer.fullExtent).catch(()=>{}); return; }
-    const tgt = g.type === "point" ? {target: g, zoom: 18, tilt: 60} : {target: g.extent ? g.extent.clone().expand(2.5) : g, tilt: 60};
+    const tgt = g.type === "point" ? {target: g, zoom: F.cat === "pte" ? 17 : 19, tilt: 65} : {target: g.extent ? g.extent.clone().expand(2.5) : g, tilt: 60};
     view.goTo(tgt, {duration: 1300}).catch(()=>{});
   }
   function fmtVal(v, f){
@@ -751,7 +882,8 @@ require([
       const g = h.graphic; if(!g?.layer) continue;
       const info = S.infos.find(i => i.layer === g.layer || i.layer.associatedLayer === g.layer);
       if(!info || !info.cats.length) continue;
-      let F = S.feats.find(F => F.info === info && F.oid != null && F.oid === (g.attributes?.[info.oidField] ?? g.getObjectId?.()));
+      const oidHit = g.attributes?.[info.oidField] ?? g.getObjectId?.();
+      let F = S.feats.find(F => F.info === info && oidHit != null && F.oids.includes(oidHit));
       if(!F){ F = agregar(info, g); if(F){ asignarEspacial([F]); recalcular(); renderKpis(); } }
       if(F){ seleccionar(F, false); return; }
     }
@@ -815,7 +947,7 @@ require([
     $("diagBody").innerHTML = `<p style="color:var(--muted);margin-top:0">Si una capa aparece con 0 elementos o sin campo de tramo, envía una captura de esta tabla para ajustarla.</p>
       <table><tr><th>Capa</th><th>Categoría</th><th>Tramos (título)</th><th>Elem.</th><th>Lectura</th><th>Campos tramo / prog. / nombre</th></tr>` +
       S.infos.map(i => `<tr><td>${esc(i.path)}<br><code>${i.layer.type}</code>${i.err?`<br><span style="color:#f87171">${esc(i.err)}</span>`:""}</td>
-        <td>${i.cats.map(k => catN(k).n).join(" + ") || "—"}</td><td>${i.tTit.join(", ") || "—"}</td><td>${i.n || 0}</td>
+        <td>${i.cats.map(k => catN(k).n).join(" + ") || "—"}</td><td>${i.tTit.join(", ") || "—"}</td><td>${i.n || 0}${i.solidos ? `<br><code>${i.solidos} sólidos</code>` : ""}</td>
         <td><code>${esc(i.modo || "—")}</code></td>
         <td><code>${i.fTramo || "—"} / ${i.fProg || "—"} / ${i.fNom || "—"}</code><br><code style="opacity:.7">${esc((i.fields||[]).map(f=>f.name).slice(0,25).join(", "))}</code></td></tr>`).join("") + `</table>`;
   }
