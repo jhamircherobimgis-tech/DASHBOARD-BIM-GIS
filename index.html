@@ -267,6 +267,20 @@ const CATS = [
   {k:"can",  n:"Canteras",          re:/CANTERA/i,              c:"--c-can"}
 ];
 const $ = id => document.getElementById(id);
+const TITULO = "Corredor Vial N°22: SECTOR A";
+
+// El diálogo de inicio de sesión de ArcGIS muestra el ID del elemento: se reemplaza por el título del dashboard
+(() => {
+  const limpiar = root => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodos = []; while(w.nextNode()) if(w.currentNode.nodeValue.includes(CONFIG.WEBSCENE_ID)) nodos.push(w.currentNode);
+    nodos.forEach(n => n.nodeValue = n.nodeValue.replace(new RegExp("\\(?\\s*" + CONFIG.WEBSCENE_ID + "\\s*\\)?"), "«" + TITULO + "»"));
+  };
+  new MutationObserver(ms => ms.forEach(m => {
+    if(m.type === "characterData") limpiar(m.target.parentNode || document.body);
+    m.addedNodes.forEach(n => (n.nodeType === 1 || n.nodeType === 3) && limpiar(n.nodeType === 3 ? n.parentNode : n));
+  })).observe(document.body, {childList:true, subtree:true, characterData:true});
+})();
 const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 const catN = k => CATS.find(c => c.k === k);
 
