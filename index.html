@@ -273,8 +273,16 @@ const TITULO = "Corredor Vial N°22: SECTOR A";
 (() => {
   const limpiar = root => {
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodos = []; while(w.nextNode()) if(w.currentNode.nodeValue.includes(CONFIG.WEBSCENE_ID)) nodos.push(w.currentNode);
-    nodos.forEach(n => n.nodeValue = n.nodeValue.replace(new RegExp("\\(?\\s*" + CONFIG.WEBSCENE_ID + "\\s*\\)?"), "«" + TITULO + "»"));
+    const enDialogo = n => n.parentElement?.closest('[class*="identity"], [class*="esri-dialog"], [role="dialog"]');
+    const nodos = [];
+    while(w.nextNode()){
+      const v = w.currentNode.nodeValue;
+      if(v.includes(CONFIG.WEBSCENE_ID) || (/ArcGIS Online/.test(v) && enDialogo(w.currentNode))) nodos.push(w.currentNode);
+    }
+    nodos.forEach(n => {
+      if(n.nodeValue.includes(CONFIG.WEBSCENE_ID)) n.nodeValue = "Inicie sesión para acceder al «" + TITULO + "»";
+      else n.nodeValue = n.nodeValue.replace(/\s*(en|on|in)?\s*ArcGIS Online\s*/i, " ").replace(/\s+$/, " ");
+    });
   };
   new MutationObserver(ms => ms.forEach(m => {
     if(m.type === "characterData") limpiar(m.target.parentNode || document.body);
