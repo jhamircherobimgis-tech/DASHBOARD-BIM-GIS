@@ -250,7 +250,9 @@ const CONFIG = {
   // Los sólidos de la misma clase a menos de esta distancia (m) se cuentan como UNA estructura. 0 = no agrupar.
   AGRUPAR_M: { alc: 25, pte: 60, sen: 3 },
   // Texto que identifica un puente dentro de los atributos (p. ej. el nombre de capa CAD)
-  PATRON_PUENTE: /PUENTE|PONT|BRIDGE|PTE[\s_-]/i
+  PATRON_PUENTE: /PUENTE|PONT|BRIDGE|PTE[\s_-]/i,
+  // Distancia máx. (m) para vincular un punto de alcantarilla/puente con su modelo 3D
+  VINCULO_M: 60
 };
 
 const CATS = [
@@ -333,7 +335,7 @@ require([
     environment:{ atmosphereEnabled:true, starsEnabled:true } });
   window.__view = view;
 
-  const S = { tramo:"ALL", cat:"alc", tramos:[], feats:[], keys:new Set(), progPts:[], rangos:{},
+  const S = { modelos:[], tramo:"ALL", cat:"alc", tramos:[], feats:[], keys:new Set(), progPts:[], rangos:{},
               sel:null, hl:null, orig:null, infos:[] };
 
   view.when(async () => {
@@ -478,8 +480,11 @@ require([
 
   // Agrupa sólidos cercanos de la misma clase en una sola estructura (alcantarilla, puente, señal)
   function claseDe(info, a){
-    if(info.cats.includes("alc") && info.cats.includes("pte"))
-      return Object.values(a).some(v => typeof v === "string" && CONFIG.PATRON_PUENTE.test(v)) ? "pte" : "alc";
+    if(info.cats.includes("alc") || info.cats.includes("pte")){
+      if(info.cats.includes("pte") && !info.cats.includes("alc")) return "pte";
+      const txt = Object.entries(a).filter(([k,v]) => typeof v === "string" && !/^__/.test(k)).map(([,v]) => v);
+      return txt.some(v => CONFIG.PATRON_PUENTE.test(v)) ? "pte" : "alc";
+    }
     return info.cats[0];
   }
   function agruparEstructuras(info, gs){
@@ -566,6 +571,34 @@ require([
     return F;
   }
 
+  // Si existen capas vectoriales de alcantarillas/puentes, ellas dan el conteo y la ubicación.
+  // Los modelos 3D (multipatch) de esas clases salen de los conteos y se vinculan al punto más cercano.
+  function vincularModelos(){
+    const OBRAS = ["alc","pte"];
+    const hayVector = S.feats.some(F => OBRAS.includes(F.cat) && !esModelo(F.info));
+    S.modelos = [];
+    if(!hayVector) return;
+    S.infos.filter(i => esModelo(i) && i.cats.some(c => OBRAS.includes(c))).forEach(i => { i.soloModelo = true; i.viva = false; });
+    S.modelos = S.feats.filter(F => F.info.soloModelo);
+    S.feats = S.feats.filter(F => !F.info.soloModelo);
+    S.feats.forEach((F, i) => F.id = i);
+    const r2 = CONFIG.VINCULO_M ** 2;
+    const libres = new Set(S.modelos);
+    // primero cada punto toma el modelo libre más cercano de su misma clase; luego de cualquier clase
+    for(const mismaClase of [true, false]){
+      for(const F of S.feats){
+        if(!OBRAS.includes(F.cat) || F.modelo || !F.pt) continue;
+        let best = null, bd = r2;
+        for(const M of libres){
+          if(!M.pt || (mismaClase && M.cat !== F.cat)) continue;
+          if(F.tramos.length && M.tramos.length && !M.tramos.some(t => F.tramos.includes(t))) continue;
+          const d = (M.pt.x-F.pt.x)**2 + (M.pt.y-F.pt.y)**2; if(d < bd){ bd = d; best = M; }
+        }
+        if(best){ F.modelo = best; best.vinculado = F; libres.delete(best); }
+      }
+    }
+  }
+
   function nombresUnicos(lista){
     const cuenta = {}; lista.forEach(F => cuenta[F.cat + "|" + F.nombre] = (cuenta[F.cat + "|" + F.nombre] || 0) + 1);
     const n = {};
@@ -599,7 +632,10 @@ require([
       const ps = S.progPts.filter(P => P.tramos.length === 1 && P.tramos[0] === t).map(P => P.prog);
       if(ps.length) S.rangos[t] = [Math.min(...ps), Math.max(...ps)];
     }
-    S.infos.forEach(i => i.n = S.feats.filter(F => F.info === i).length);
+    S.infos.forEach(i => {
+      i.n = S.feats.filter(F => F.info === i).length;
+      if(i.soloModelo){ const ms = S.modelos.filter(M => M.info === i); i.n = ms.length; i.vinc = ms.filter(M => M.vinculado).length; }
+    });
   }
 
   async function analizar(){
@@ -630,7 +666,10 @@ require([
         nombresUnicos(nuevos);
       }catch(e){ info.err = e.message || String(e); console.warn(info.title, e); }
     }));
+    vincularModelos();
     asignarEspacial(S.feats);
+    asignarEspacial(S.modelos);
+    S.modelos.forEach(M => { if(M.vinculado) M.tramos = M.vinculado.tramos.slice(); });
     recalcular();
     if(!S.feats.some(F => F.cat === S.cat)) S.cat = (CATS.find(c => S.feats.some(F => F.cat === c.k)) || CATS[1]).k;
     const tot = S.feats.length;
@@ -641,7 +680,7 @@ require([
 
   let releyendo = false;
   async function releerVivas(){
-    const vivas = S.infos.filter(i => i.viva && i.layer.visible);
+    const vivas = S.infos.filter(i => i.viva && !i.soloModelo && i.layer.visible);
     if(!vivas.length || releyendo) return;
     releyendo = true;
     const nuevos = [];
@@ -670,7 +709,7 @@ require([
         try{ (await view.whenLayerView(L)).filter = null; }catch(e){}
         continue;
       }
-      const fs = S.feats.filter(F => F.info === info);
+      const fs = info.soloModelo ? S.modelos.filter(M => M.info === info) : S.feats.filter(F => F.info === info);
       const dentro = fs.filter(F => F.tramos.includes(t));
       const cubre = info.tTit.length ? info.tTit.includes(t) : (dentro.length > 0 || !fs.length || fs.every(F => !F.tramos.length));
       const vis = info.userVis && cubre;
@@ -752,7 +791,7 @@ require([
 
   function renderKpis(){
     $("kpis").innerHTML = CATS.map(c => {
-      const capas = S.infos.filter(i => i.cats.includes(c.k));
+      const capas = S.infos.filter(i => i.cats.includes(c.k) && !i.soloModelo);
       const n = S.feats.filter(F => F.cat === c.k && enTramo(F)).length;
       const viva = capas.some(i => i.viva);
       return `<button class="kpi ${S.cat===c.k?"sel":""} ${capas.length?"":"off"}" style="--k:var(${c.c})" data-k="${c.k}" title="${capas.length ? capas.map(i=>i.title).join(", ") : "Sin capa en la escena"}${viva?" · modelo 3D: el conteo crece al navegar":""}"><b>${n}${viva?"<span style='font-size:11px;color:var(--muted)'>+</span>":""}</b><small>${c.n}</small></button>`;
@@ -802,7 +841,7 @@ require([
       <div class="lyr">
         <button class="sw ${i.layer.visible?"on":""}" data-i="${i.idx}" aria-label="Mostrar ${esc(i.title)}"></button>
         <div class="nm"><b title="${esc(i.path)}">${esc(i.title)}</b>
-          <small>${esModelo(i)?'<span class="tag m3d">Modelo 3D</span>':'<span class="tag">Vector</span>'}${i.tTit.length ? "Tramos " + (i.tTit.length>1 ? i.tTit[0]+"–"+i.tTit.at(-1) : i.tTit[0]) : "Todo el corredor"}${i.n ? " · " + i.n + " elem." : ""}</small></div>
+          <small>${esModelo(i)?'<span class="tag m3d">Modelo 3D</span>':'<span class="tag">Vector</span>'}${i.tTit.length ? "Tramos " + (i.tTit.length>1 ? i.tTit[0]+"–"+i.tTit.at(-1) : i.tTit[0]) : "Todo el corredor"}${i.soloModelo ? ` · ${i.n} estructuras, ${i.vinc} vinculadas` : i.n ? " · " + i.n + " elem." : ""}</small></div>
         <button class="ico" data-z="${i.idx}" title="Ir a la capa">⌖</button>
         <button class="ico" data-s="${i.idx}" title="Ver elementos">≡</button>
       </div>`;
@@ -815,7 +854,7 @@ require([
     });
     $("capas").querySelectorAll("[data-z]").forEach(b => b.onclick = () => {
       const i = S.infos[+b.dataset.z]; i.userVis = true; encender(i.layer, true); renderCapas();
-      const fs = S.feats.filter(F => F.info === i); const e = extentFeats(fs) || i.layer.fullExtent;
+      const fs = (i.soloModelo ? S.modelos : S.feats).filter(F => F.info === i); const e = extentFeats(fs) || i.layer.fullExtent;
       if(e) view.goTo({target: e, tilt: 55}, {duration: 1400}).catch(()=>{});
     });
     $("capas").querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
@@ -833,9 +872,12 @@ require([
   /* ---------- selección y ficha ---------- */
   async function seleccionar(F, fly){
     S.sel = F;
-    S.hl?.remove(); S.hl = null;
-    encender(F.info.layer, true);
-    try{ const lv = await view.whenLayerView(F.info.layer); if(F.oids.length) S.hl = lv.highlight(F.oids); }catch(e){}
+    (S.hl || []).forEach(h => h.remove()); S.hl = [];
+    for(const X of [F, F.modelo].filter(Boolean)){
+      if(X === F.modelo && !X.info.userVis) continue;
+      encender(X.info.layer, true);
+      try{ const lv = await view.whenLayerView(X.info.layer); if(X.oids.length) S.hl.push(lv.highlight(X.oids)); }catch(e){}
+    }
     if(S.cat !== F.cat){ S.cat = F.cat; renderKpis(); renderBars(); }
     renderList();
     document.querySelector(`.item[data-id="${F.id}"]`)?.scrollIntoView({block:"nearest"});
@@ -865,10 +907,20 @@ require([
       const f = F.info.fields.find(x => x.name === k);
       return `<tr><td>${esc(f?.alias || k)}</td><td>${fmtVal(v, f)}</td></tr>`;
     });
+    if(F.modelo){
+      const M = F.modelo;
+      rows.push(`<tr><td colspan="2" style="color:var(--c-pte);font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding-top:12px">Modelo 3D vinculado · ${esc(M.info.title)}</td></tr>`);
+      Object.entries(M.a).filter(([k]) => !SKIP_RE.test(k)).forEach(([k,v]) => {
+        const f = M.info.fields.find(x => x.name === k);
+        rows.push(`<tr><td>${esc(f?.alias || k)}</td><td>${fmtVal(v, f)}</td></tr>`);
+      });
+    } else if(["alc","pte"].includes(F.cat) && S.modelos.length){
+      rows.push(`<tr><td colspan="2" style="color:var(--faint);padding-top:10px">Sin modelo 3D a menos de ${CONFIG.VINCULO_M} m.</td></tr>`);
+    }
     $("fTab").innerHTML = rows.join("") || "<tr><td colspan=2>Sin atributos</td></tr>";
     $("ficha").classList.add("show");
   }
-  $("fX").onclick = () => { $("ficha").classList.remove("show"); S.hl?.remove(); S.sel = null; renderList(); };
+  $("fX").onclick = () => { $("ficha").classList.remove("show"); (S.hl || []).forEach(h => h.remove()); S.hl = []; S.sel = null; renderList(); };
   $("fZoom").onclick = () => S.sel && zoomA(S.sel);
   $("fCopy").onclick = () => {
     if(!S.sel) return;
@@ -883,6 +935,11 @@ require([
       const info = S.infos.find(i => i.layer === g.layer || i.layer.associatedLayer === g.layer);
       if(!info || !info.cats.length) continue;
       const oidHit = g.attributes?.[info.oidField] ?? g.getObjectId?.();
+      if(info.soloModelo){
+        const M = S.modelos.find(M => M.info === info && M.oids.includes(oidHit));
+        if(M?.vinculado){ seleccionar(M.vinculado, false); return; }
+        continue;
+      }
       let F = S.feats.find(F => F.info === info && oidHit != null && F.oids.includes(oidHit));
       if(!F){ F = agregar(info, g); if(F){ asignarEspacial([F]); recalcular(); renderKpis(); } }
       if(F){ seleccionar(F, false); return; }
@@ -947,7 +1004,7 @@ require([
     $("diagBody").innerHTML = `<p style="color:var(--muted);margin-top:0">Si una capa aparece con 0 elementos o sin campo de tramo, envía una captura de esta tabla para ajustarla.</p>
       <table><tr><th>Capa</th><th>Categoría</th><th>Tramos (título)</th><th>Elem.</th><th>Lectura</th><th>Campos tramo / prog. / nombre</th></tr>` +
       S.infos.map(i => `<tr><td>${esc(i.path)}<br><code>${i.layer.type}</code>${i.err?`<br><span style="color:#f87171">${esc(i.err)}</span>`:""}</td>
-        <td>${i.cats.map(k => catN(k).n).join(" + ") || "—"}</td><td>${i.tTit.join(", ") || "—"}</td><td>${i.n || 0}${i.solidos ? `<br><code>${i.solidos} sólidos</code>` : ""}</td>
+        <td>${i.cats.map(k => catN(k).n).join(" + ") || "—"}</td><td>${i.tTit.join(", ") || "—"}</td><td>${i.n || 0}${i.soloModelo ? `<br><code>modelo · ${i.vinc} vinculadas</code>` : ""}${i.solidos ? `<br><code>${i.solidos} sólidos</code>` : ""}</td>
         <td><code>${esc(i.modo || "—")}</code></td>
         <td><code>${i.fTramo || "—"} / ${i.fProg || "—"} / ${i.fNom || "—"}</code><br><code style="opacity:.7">${esc((i.fields||[]).map(f=>f.name).slice(0,25).join(", "))}</code></td></tr>`).join("") + `</table>`;
   }
