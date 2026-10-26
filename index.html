@@ -143,6 +143,32 @@
     .ficha{left:12px;right:12px;width:auto;bottom:auto;top:76px}
     .status .lbl{display:none}
   }
+  /* Recorrido virtual */
+  .btn-acc{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  .btn-acc:hover{filter:brightness(1.08)}
+  .rec{position:absolute;left:50%;transform:translateX(-50%);bottom:28px;width:min(780px,calc(100% - 24px));display:none;
+       background:rgba(20,28,35,.95);backdrop-filter:blur(6px);border:1px solid var(--line-2);border-radius:14px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.4);z-index:3}
+  .rec.show{display:block}
+  .rec-top,.rec-mid,.rec-bot{display:flex;align-items:center;gap:8px}
+  .rec-top{margin-bottom:8px}
+  .rec select{flex:1;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px}
+  .rec .seg{margin:0;grid-template-columns:repeat(3,auto)}
+  .rec .seg button{padding:5px 10px}
+  .play{width:40px;height:40px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;cursor:pointer;flex:none;display:grid;place-items:center}
+  .play:hover{filter:brightness(1.1)}
+  .rec-mid input[type=range]{flex:1}
+  .rec-km{font-family:var(--mono);font-size:20px;font-weight:500;color:var(--accent);min-width:118px;text-align:right;white-space:nowrap}
+  .rec-bot{margin-top:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .vel{display:flex;gap:3px}
+  .vel button{background:var(--bg);border:1px solid var(--line-2);border-radius:6px;padding:3px 7px;cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .vel button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .alt{display:flex;align-items:center;gap:6px}
+  .alt input{width:90px}
+  .rec-info{flex:1;min-width:200px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rec-info b{color:var(--text);font-weight:500}
+  .rec-info a{color:var(--accent);cursor:pointer;text-decoration:none}
+  main.rec-on .ficha{bottom:170px;max-height:calc(100% - 260px)}
+  @media (max-width:900px){ .rec-km{font-size:16px;min-width:90px} .rec .seg button{padding:5px 6px} }
 </style>
 </head>
 <body>
@@ -152,6 +178,7 @@
     <div class="ttl"><h1>Corredor Vial N°22: SECTOR A</h1><span>Dashboard BIM · Modelo 3D por tramos</span></div>
     <div class="hspace"></div>
     <div class="status"><span class="dot" id="stDot"></span><span class="lbl" id="stTxt">Conectando…</span></div>
+    <button class="btn btn-acc" id="btnRec" title="Recorrer la carretera en vehículo">▶ Recorrido virtual</button>
     <button class="btn" id="btnDiag" title="Diagnóstico de capas y campos">Diagnóstico</button>
   </header>
   <div class="body">
@@ -223,6 +250,30 @@
         <div class="fb"><table id="fTab"></table></div>
         <div class="ff"><button class="btn" id="fZoom">Acercar</button><button class="btn" id="fCopy">Copiar parámetros</button></div>
       </div>
+      <div class="rec" id="rec">
+        <div class="rec-top">
+          <select id="recRuta" aria-label="Ruta"></select>
+          <button class="ico" id="recRev" title="Invertir sentido">⇄</button>
+          <div class="seg" id="recModo">
+            <button data-m="conductor">Conductor</button>
+            <button data-m="persecucion" class="on">Persecución</button>
+            <button data-m="dron">Dron</button>
+          </div>
+          <button class="x" id="recX" aria-label="Cerrar recorrido">×</button>
+        </div>
+        <div class="rec-mid">
+          <button class="play" id="recPlay" title="Reproducir / pausar (barra espaciadora)">▶</button>
+          <input type="range" id="recSl" min="0" max="1000" step="1" value="0" aria-label="Posición en la ruta">
+          <div class="rec-km" id="recKm">0+000</div>
+        </div>
+        <div class="rec-bot">
+          <div class="vel" id="recVel">
+            <button data-v="20">20</button><button data-v="40">40</button><button data-v="60" class="on">60</button><button data-v="90">90</button><button data-v="200">200</button><span style="align-self:center;margin-left:2px">km/h</span>
+          </div>
+          <div class="alt"><label for="recAlt">Altura cámara</label><input type="range" id="recAlt" min="-10" max="80" value="0"><output id="recAltO" style="font-family:var(--mono)">+0 m</output></div>
+          <div class="rec-info" id="recInfo"></div>
+        </div>
+      </div>
       <div class="toast" id="toast"></div>
       <div class="loading" id="loading"><div><div class="spin"></div><div id="loadTxt">Cargando escena…</div></div></div>
     </main>
@@ -252,7 +303,12 @@ const CONFIG = {
   // Texto que identifica un puente dentro de los atributos (p. ej. el nombre de capa CAD)
   PATRON_PUENTE: /PUENTE|PONT|BRIDGE|PTE[\s_-]/i,
   // Distancia máx. (m) para vincular un punto de alcantarilla/puente con su modelo 3D
-  VINCULO_M: 60
+  VINCULO_M: 60,
+  // Recorrido virtual
+  CAPAS_EJE: /EJE|ALINEA|CENTER|AXIS|ALIGN/i,     // capas de líneas usadas como ruta (título)
+  VEHICULO_MODELOS: ["Pickup_Truck", "Ford_Fusion", "Audi_A6"], // estilo EsriRealisticTransportationStyle
+  VEHICULO_GIRO: 0,          // grados: corrige la orientación del modelo si avanza de costado (90 / 180 / 270)
+  RECORRIDO_PASO: 5          // m entre puntos de la trayectoria suavizada
 };
 
 const CATS = [
@@ -341,8 +397,11 @@ require([
   "esri/config","esri/WebScene","esri/views/SceneView","esri/identity/OAuthInfo","esri/identity/IdentityManager",
   "esri/widgets/Home","esri/widgets/DirectLineMeasurement3D","esri/widgets/Slice","esri/widgets/Expand",
   "esri/core/reactiveUtils","esri/geometry/Extent","esri/layers/support/FeatureFilter",
-  "esri/request","esri/geometry/Point","esri/geometry/projection"
-], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter, esriRequest, Point, projection) => {
+  "esri/request","esri/geometry/Point","esri/geometry/projection",
+  "esri/Graphic","esri/layers/GraphicsLayer","esri/symbols/WebStyleSymbol","esri/Camera",
+  "esri/geometry/Multipoint","esri/geometry/SpatialReference","esri/geometry/support/webMercatorUtils"
+], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter, esriRequest, Point, projection,
+    Graphic, GraphicsLayer, WebStyleSymbol, Camera, Multipoint, SpatialReference, webMercatorUtils) => {
 
   esriConfig.portalUrl = CONFIG.PORTAL_URL;
   if(CONFIG.APP_ID){
@@ -718,6 +777,7 @@ require([
     S.tramo = String(t);
     renderAll();
     await aplicarFiltro();
+    if(R.abierto){ rutaDeTramo(S.tramo); return; }
     volarTramo();
   }
 
@@ -1020,6 +1080,338 @@ require([
     };
     $("ambH").onclick = () => $("amb").classList.toggle("min");
   }
+
+  /* =================== RECORRIDO VIRTUAL =================== */
+  const R = { abierto:false, rutas:[], ruta:null, s:0, v:60, playing:false, modo:"persecucion", alt:0,
+              gl:null, car:null, mark:null, sym:null, carHead:null, camH:null, camT:null, last:0, hud:0, listo:false };
+
+  async function initRecorrido(){
+    if(R.listo) return;
+    R.gl = new GraphicsLayer({ title:"Recorrido virtual", listMode:"hide", elevationInfo:{ mode:"relative-to-scene" } });
+    scene.add(R.gl);
+    R.sym = { type:"point-3d", symbolLayers:[{ type:"object", resource:{ primitive:"cube" }, width:2.2, depth:4.8, height:1.7,
+              anchor:"bottom", material:{ color:"#f2b134" } }] };
+    for(const name of CONFIG.VEHICULO_MODELOS){
+      try{ R.sym = await new WebStyleSymbol({ styleName:"EsriRealisticTransportationStyle", name }).fetchSymbol(); break; }catch(e){}
+    }
+    R.car = new Graphic({ symbol: R.sym });
+    R.mark = new Graphic({ symbol:{ type:"point-3d", symbolLayers:[{ type:"icon", resource:{ primitive:"circle" }, size:14,
+              material:{ color:"#f2b134" }, outline:{ color:"#ffffff", size:2 } }] } });
+    R.gl.addMany([R.car, R.mark]);
+    await construirRutas();
+    R.listo = true;
+  }
+
+  /* ---- rutas: capas de eje + progresivas de cada tramo ---- */
+  function unirPaths(paths){
+    const d2 = (a,b) => (a[0]-b[0])**2 + (a[1]-b[1])**2;
+    const rest = paths.map(p => p.slice()); let out = rest.shift();
+    while(rest.length){
+      const e = out[out.length-1], b0 = out[0]; let bi = 0, modo = 0, bd = Infinity;
+      rest.forEach((p,i) => {
+        const c = [d2(e,p[0]), d2(e,p.at(-1)), d2(b0,p.at(-1)), d2(b0,p[0])];
+        c.forEach((d,m) => { if(d < bd){ bd = d; bi = i; modo = m; } });
+      });
+      let p = rest.splice(bi,1)[0];
+      if(modo === 0) out = out.concat(p);
+      else if(modo === 1) out = out.concat(p.reverse());
+      else if(modo === 2) out = p.concat(out);
+      else out = p.reverse().concat(out);
+    }
+    return out;
+  }
+
+  async function construirRutas(){
+    R.rutas = [];
+    const ejes = S.infos.filter(i => CONFIG.CAPAS_EJE.test(i.path));
+    for(const info of ejes){
+      try{
+        const L = info.layer; await L.load();
+        if(L.type !== "feature" || L.geometryType !== "polyline") continue;
+        const q = L.createQuery(); q.where = "1=1"; q.outFields = ["*"]; q.returnGeometry = true; q.returnZ = true;
+        q.outSpatialReference = view.spatialReference;
+        const r = await L.queryFeatures(q);
+        const fNom = L.fields.find(f => f.type === "string" && /NOMBRE|NAME|EJE|ALINE|DESCR|TRAMO/i.test(f.name))?.name;
+        r.features.forEach((g, k) => {
+          const paths = g.geometry?.paths; if(!paths?.length) return;
+          let tr = info.tTit.length === 1 ? info.tTit[0] : null;
+          for(const v of Object.values(g.attributes || {})){ const t = tramoEnTexto(v); if(t){ tr = t; break; } }
+          const nom = (fNom && g.attributes[fNom]) || (info.title + (r.features.length > 1 ? " · " + (k+1) : ""));
+          R.rutas.push({ id:"e"+R.rutas.length, tipo:"eje", nombre:String(nom), tramo:tr, raw:unirPaths(paths), hasZ:!!g.geometry.hasZ });
+        });
+      }catch(e){ console.warn("Eje", info.title, e); }
+    }
+    for(const t of S.tramos){
+      const ps = S.progPts.filter(P => P.tramos.length === 1 && P.tramos[0] === t && P.pt).sort((a,b) => a.prog - b.prog);
+      const vistos = new Set(), pts = [];
+      for(const P of ps){
+        const k = Math.round(P.prog * 10); if(vistos.has(k)) continue; vistos.add(k);
+        const g = P.g.geometry; pts.push([P.pt.x, P.pt.y, g?.type === "point" ? (g.z || 0) : 0]);
+      }
+      if(pts.length >= 3) R.rutas.push({ id:"p"+t, tipo:"prog", nombre:`Tramo ${t} · por progresivas`, tramo:t, raw:pts,
+                                        hasZ: ps.some(P => P.g.geometry?.hasZ) });
+    }
+    const sel = $("recRuta");
+    const grp = (tit, arr) => arr.length ? `<optgroup label="${tit}">${arr.map(r => `<option value="${r.id}">${esc(r.nombre)}${r.tramo && r.tipo==="eje" ? " · T" + r.tramo : ""}</option>`).join("")}</optgroup>` : "";
+    sel.innerHTML = grp("Ejes de diseño", R.rutas.filter(r => r.tipo === "eje")) + grp("Por progresivas", R.rutas.filter(r => r.tipo === "prog"))
+                  || `<option value="">Sin ejes ni progresivas</option>`;
+  }
+
+  function catmull(P, k){
+    const out = [P[0]];
+    const tj = (a,b) => Math.sqrt(Math.hypot(b[0]-a[0], b[1]-a[1]) || 1e-6);
+    for(let i = 0; i < P.length-1; i++){
+      const p0 = P[i-1] || P[i], p1 = P[i], p2 = P[i+1], p3 = P[i+2] || P[i+1];
+      const m = Math.max(1, Math.ceil(Math.hypot(p2[0]-p1[0], p2[1]-p1[1]) * k / 2));
+      const t0 = 0, t1 = t0 + tj(p0,p1), t2 = t1 + tj(p1,p2), t3 = t2 + tj(p2,p3);
+      for(let j = 1; j <= m; j++){
+        const t = t1 + (t2-t1) * j / m;
+        out.push([0,1,2].map(d => {
+          const A1 = (t1-t)/(t1-t0)*p0[d] + (t-t0)/(t1-t0)*p1[d];
+          const A2 = (t2-t)/(t2-t1)*p1[d] + (t-t1)/(t2-t1)*p2[d];
+          const A3 = (t3-t)/(t3-t2)*p2[d] + (t-t2)/(t3-t2)*p3[d];
+          const B1 = (t2-t)/(t2-t0)*A1 + (t-t0)/(t2-t0)*A2;
+          const B2 = (t3-t)/(t3-t1)*A2 + (t-t1)/(t3-t1)*A3;
+          return (t2-t)/(t2-t1)*B1 + (t-t1)/(t2-t1)*B2;
+        }));
+      }
+    }
+    return out;
+  }
+
+  async function prepararRuta(r){
+    if(r.X) return r;
+    const vsr = view.spatialReference, wgs = vsr.isWGS84;
+    r.wsr = wgs ? SpatialReference.WebMercator : vsr;
+    let P = r.raw.map(p => { const [x,y] = wgs ? webMercatorUtils.lngLatToXY(p[0], p[1]) : [p[0], p[1]]; return [x, y, p[2] || 0]; });
+    const midY = P[Math.floor(P.length/2)][1];
+    r.k = r.wsr.isWebMercator ? Math.cos(Math.atan(Math.sinh(midY / 6378137))) : 1;  // m reales por unidad de mapa
+    P = P.filter((p,i) => i === 0 || Math.hypot(p[0]-P[i-1][0], p[1]-P[i-1][1]) * r.k > 0.05);
+    if(P.length < 2) throw new Error("ruta sin geometría");
+    let len = 0; for(let i = 1; i < P.length; i++) len += Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]) * r.k;
+    if(len / (P.length-1) > 6) P = catmull(P, r.k);
+    // remuestreo uniforme
+    const c = [0]; for(let i = 1; i < P.length; i++) c.push(c[i-1] + Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]) * r.k);
+    const total = c.at(-1), paso = CONFIG.RECORRIDO_PASO, n = Math.floor(total / paso) + 1;
+    const X = new Float64Array(n+1), Y = new Float64Array(n+1), Z = new Float64Array(n+1);
+    let i = 0;
+    for(let j = 0; j <= n; j++){
+      const sj = Math.min(j * paso, total);
+      while(i < c.length-2 && c[i+1] < sj) i++;
+      const f = c[i+1] > c[i] ? (sj - c[i]) / (c[i+1] - c[i]) : 0;
+      X[j] = P[i][0] + (P[i+1][0]-P[i][0]) * f; Y[j] = P[i][1] + (P[i+1][1]-P[i][1]) * f; Z[j] = P[i][2] + (P[i+1][2]-P[i][2]) * f;
+    }
+    Object.assign(r, { X, Y, Z, n: n+1, total, paso });
+    // cota: z de diseño si viene en los datos; si no, terreno
+    const conZ = r.raw.filter(p => Math.abs(p[2] || 0) > 1).length;
+    r.absZ = r.hasZ && conZ > r.raw.length * 0.8;
+    if(!r.absZ){
+      const cada = 4, idx = []; for(let j = 0; j < r.n; j += cada) idx.push(j); if(idx.at(-1) !== r.n-1) idx.push(r.n-1);
+      const zs = [];
+      for(let a = 0; a < idx.length; a += 1500){
+        const sub = idx.slice(a, a+1500);
+        try{
+          const res = await scene.ground.queryElevation(new Multipoint({ points: sub.map(j => [X[j], Y[j]]), spatialReference: r.wsr }));
+          res.geometry.points.forEach(p => zs.push(p[2] || 0));
+        }catch(e){ sub.forEach(() => zs.push(0)); }
+      }
+      for(let a = 0; a < idx.length-1; a++){
+        for(let j = idx[a]; j <= idx[a+1]; j++){ const f = (j - idx[a]) / ((idx[a+1] - idx[a]) || 1); Z[j] = zs[a] + (zs[a+1] - zs[a]) * f; }
+      }
+    }
+    // suavizado vertical (±25 m)
+    const w = Math.max(1, Math.round(25 / paso)), Zs = new Float64Array(r.n);
+    for(let j = 0; j < r.n; j++){ let s = 0, m = 0; for(let q = Math.max(0, j-w); q <= Math.min(r.n-1, j+w); q++){ s += Z[q]; m++; } Zs[j] = s / m; }
+    r.Z = Zs;
+    calibrar(r);
+    return r;
+  }
+
+  // Progresivas y obras proyectadas sobre la ruta (estación en m desde el inicio)
+  function estacion(r, x, y, maxD){
+    let best = -1, bd = (maxD / r.k) ** 2;
+    for(let j = 0; j < r.n; j++){ const d = (r.X[j]-x)**2 + (r.Y[j]-y)**2; if(d < bd){ bd = d; best = j; } }
+    return best < 0 ? null : best * r.paso;
+  }
+  function aWork(r, pt){ return r.wsr === view.spatialReference || !view.spatialReference.isWGS84 ? [pt.x, pt.y] : webMercatorUtils.lngLatToXY(pt.x, pt.y); }
+  function calibrar(r){
+    const ps = S.progPts.filter(P => P.pt && (!r.tramo || P.tramos.includes(r.tramo)));
+    r.ctrl = [];
+    for(const P of ps){ const [x,y] = aWork(r, P.pt); const s = estacion(r, x, y, 40); if(s != null) r.ctrl.push({ s, prog:P.prog, tramo:P.tramos.length === 1 ? P.tramos[0] : null }); }
+    r.ctrl.sort((a,b) => a.s - b.s);
+    if(r.ctrl.length >= 2){
+      const a = r.ctrl[0], b = r.ctrl.at(-1);
+      if(b.prog < a.prog) invertir(r, true);
+      const limpio = []; for(const c of r.ctrl){ if(!limpio.length || c.prog > limpio.at(-1).prog) limpio.push(c); }
+      r.ctrl = limpio;
+    }
+    r.obras = [];
+    for(const F of S.feats){
+      if(!["alc","pte","sen","aux","acc","geo","can"].includes(F.cat) || !F.pt) continue;
+      const [x,y] = aWork(r, F.pt); const s = estacion(r, x, y, F.cat === "aux" || F.cat === "can" ? 250 : 60);
+      if(s != null) r.obras.push({ s, F });
+    }
+    r.obras.sort((a,b) => a.s - b.s);
+  }
+  function invertir(r, soloDatos){
+    for(const A of ["X","Y","Z"]) r[A] = r[A].slice().reverse();
+    const T = (r.n - 1) * r.paso;
+    (r.ctrl || []).forEach(c => c.s = T - c.s); r.ctrl?.sort((a,b) => a.s - b.s);
+    (r.obras || []).forEach(o => o.s = T - o.s); r.obras?.sort((a,b) => a.s - b.s);
+    if(!soloDatos){ R.s = Math.max(0, r.total - R.s); }
+  }
+
+  function pos(r, s){
+    s = Math.max(0, Math.min(r.total, s));
+    const f0 = s / r.paso, j = Math.min(r.n-2, Math.floor(f0)), f = f0 - j;
+    return { x: r.X[j] + (r.X[j+1]-r.X[j]) * f, y: r.Y[j] + (r.Y[j+1]-r.Y[j]) * f, z: r.Z[j] + (r.Z[j+1]-r.Z[j]) * f };
+  }
+  function rumbo(r, s, atras, adelante){
+    let a = pos(r, s - atras), b = pos(r, s + adelante);
+    if(Math.hypot(b.x-a.x, b.y-a.y) < 1e-6){ a = pos(r, r.total - 10); b = pos(r, r.total); }
+    return (Math.atan2(b.x - a.x, b.y - a.y) * 180 / Math.PI + 360) % 360;
+  }
+  const angDif = (a,b) => ((b - a + 540) % 360) - 180;
+  function progEn(r, s){
+    const C = r.ctrl; if(!C?.length) return null;
+    if(s <= C[0].s) return { prog: C[0].prog - (C[0].s - s), tramo: C[0].tramo };
+    if(s >= C.at(-1).s) return { prog: C.at(-1).prog + (s - C.at(-1).s), tramo: C.at(-1).tramo };
+    let lo = 0, hi = C.length-1; while(hi - lo > 1){ const m = (lo+hi) >> 1; if(C[m].s <= s) lo = m; else hi = m; }
+    const a = C[lo], b = C[hi], f = (s - a.s) / ((b.s - a.s) || 1);
+    return { prog: a.prog + (b.prog - a.prog) * f, tramo: (f < .5 ? a : b).tramo };
+  }
+
+  function camara(r, s, dt){
+    const p = pos(r, s), h = rumbo(r, s, 4, 8);
+    const objetivo = R.modo === "conductor" ? rumbo(r, s, 0, 35) : rumbo(r, s, 10, 40);
+    const a = dt == null ? 1 : 1 - Math.exp(-dt * (R.modo === "conductor" ? 4 : 2.2));
+    R.camH = R.camH == null || dt == null ? objetivo : (R.camH + angDif(R.camH, objetivo) * a + 360) % 360;
+    const rad = R.camH * Math.PI / 180, sx = Math.sin(rad), sy = Math.cos(rad);
+    let x, y, z, tilt, fov = 60;
+    if(R.modo === "conductor"){
+      const q = pos(r, s + 40), pend = Math.atan2(q.z - p.z, 40) * 180 / Math.PI;
+      const tObj = Math.max(70, Math.min(100, 88 + pend));
+      R.camT = R.camT == null || dt == null ? tObj : R.camT + (tObj - R.camT) * a;
+      x = p.x; y = p.y; z = p.z + 2.2 + R.alt; tilt = R.camT; fov = 75;
+    } else if(R.modo === "persecucion"){
+      const d = 20 / r.k; x = p.x - sx * d; y = p.y - sy * d; z = Math.max(p.z, pos(r, s - 20).z) + 8 + R.alt; tilt = 76;
+    } else {
+      const d = 170 / r.k; x = p.x - sx * d; y = p.y - sy * d; z = p.z + 120 + R.alt; tilt = 56;
+    }
+    return { p, h, cam: new Camera({ position: new Point({ x, y, z, spatialReference: r.wsr }), heading: R.camH, tilt, fov }) };
+  }
+
+  function dibujar(dt, moverCam = true){
+    const r = R.ruta; if(!r) return;
+    const { p, h, cam } = camara(r, R.s, dt);
+    const g = new Point({ x: p.x, y: p.y, z: r.absZ ? p.z : 0, spatialReference: r.wsr });
+    if(R.carHead == null || Math.abs(angDif(R.carHead, h)) > 0.6){
+      const sym = (R.sym.clone ? R.sym.clone() : JSON.parse(JSON.stringify(R.sym)));
+      const lyr = sym.symbolLayers.getItemAt ? sym.symbolLayers.getItemAt(0) : sym.symbolLayers[0];
+      lyr.heading = (h + CONFIG.VEHICULO_GIRO) % 360;
+      R.car.symbol = sym; R.carHead = h;
+    }
+    R.car.geometry = g; R.mark.geometry = g;
+    R.mark.visible = R.modo === "dron";
+    if(moverCam) view.camera = cam;
+    hud(false);
+    return cam;
+  }
+
+  function hud(forzar){
+    const now = performance.now(); if(!forzar && now - R.hud < 150) return; R.hud = now;
+    const r = R.ruta; if(!r) return;
+    $("recSl").value = Math.round(R.s);
+    const pr = progEn(r, R.s);
+    $("recKm").textContent = pr ? fmtProg(Math.max(0, pr.prog)) : fmtProg(R.s);
+    const tr = pr?.tramo || r.tramo;
+    const prox = r.obras.find(o => o.s > R.s + 2 && ["alc","pte","sen"].includes(o.F.cat));
+    const falta = r.total - R.s;
+    $("recInfo").innerHTML = `${tr ? `<b>Tramo ${tr}</b> · ` : ""}${pr ? "" : "dist. desde inicio · "}faltan ${falta >= 1000 ? (falta/1000).toFixed(2) + " km" : Math.round(falta) + " m"}`
+      + (prox ? ` · Próximo: <a data-f="${prox.F.id}">${esc(prox.F.nombre)}</a> en ${Math.round(prox.s - R.s)} m` : "");
+    $("recInfo").querySelector("a")?.addEventListener("click", e => { pausar(); seleccionar(S.feats[+e.target.dataset.f], false); });
+  }
+
+  function bucle(t){
+    if(!R.playing) return;
+    const dt = Math.min(0.1, (t - (R.last || t)) / 1000); R.last = t;
+    R.s += R.v / 3.6 * dt;
+    if(R.s >= R.ruta.total){ R.s = R.ruta.total; dibujar(dt); pausar(); toast("Fin del recorrido."); return; }
+    dibujar(dt);
+    requestAnimationFrame(bucle);
+  }
+  function reproducir(){
+    if(!R.ruta) return;
+    if(R.s >= R.ruta.total - 1) R.s = 0;
+    R.playing = true; R.last = 0; $("recPlay").textContent = "❚❚";
+    $("ficha").classList.remove("show");
+    requestAnimationFrame(bucle);
+  }
+  function pausar(){ R.playing = false; $("recPlay").textContent = "▶"; }
+
+  async function elegirRuta(id, volar = true){
+    const r = R.rutas.find(x => x.id === id); if(!r) return;
+    pausar();
+    $("recInfo").textContent = "Preparando trayectoria…";
+    try{ await prepararRuta(r); }catch(e){ toast("No se pudo preparar la ruta: " + e.message); return; }
+    if(r.total < 20){ toast("La ruta es demasiado corta."); return; }
+    R.ruta = r; R.s = 0; R.carHead = null; R.camH = null; R.camT = null;
+    $("recRuta").value = r.id;
+    $("recSl").max = Math.round(r.total);
+    R.gl.elevationInfo = { mode: r.absZ ? "absolute-height" : "relative-to-scene" };
+    if(volar){
+      const cam = dibujar(null, false);
+      await view.goTo(cam, { duration: 1800 }).catch(() => {});
+    } else dibujar(null);
+    hud(true);
+  }
+  function rutaDeTramo(t){
+    const n = t === "ALL" ? null : +t;
+    const r = R.rutas.find(r => r.tipo === "eje" && r.tramo === n) || R.rutas.find(r => r.tipo === "prog" && r.tramo === n) || (n == null ? R.rutas[0] : null);
+    if(r) elegirRuta(r.id); else toast(`No hay eje ni progresivas para el tramo ${t}.`);
+  }
+
+  async function abrirRecorrido(){
+    if(R.abierto){ cerrarRecorrido(); return; }
+    R.abierto = true; $("rec").classList.add("show"); document.querySelector("main").classList.add("rec-on");
+    $("btnRec").textContent = "■ Cerrar recorrido";
+    $("recInfo").textContent = "Cargando ejes y vehículo…";
+    try{ await initRecorrido(); }catch(e){ console.error(e); toast("Error al iniciar el recorrido: " + e.message); }
+    R.gl.visible = true;
+    if(!R.rutas.length){ $("recInfo").textContent = "No se encontraron capas de eje ni progresivas."; return; }
+    if(!R.ruta) rutaDeTramo(S.tramo); else { dibujar(null); }
+  }
+  function cerrarRecorrido(){
+    pausar(); R.abierto = false; $("rec").classList.remove("show"); document.querySelector("main").classList.remove("rec-on");
+    $("btnRec").textContent = "▶ Recorrido virtual";
+    if(R.gl) R.gl.visible = false;
+  }
+
+  $("btnRec").onclick = abrirRecorrido;
+  $("recX").onclick = cerrarRecorrido;
+  $("recPlay").onclick = () => R.playing ? pausar() : reproducir();
+  $("recRuta").onchange = e => elegirRuta(e.target.value);
+  $("recRev").onclick = () => { if(!R.ruta) return; invertir(R.ruta, false); R.carHead = null; R.camH = null; dibujar(null); };
+  $("recSl").oninput = e => { R.s = +e.target.value; if(!R.playing) dibujar(null); };
+  $("recModo").querySelectorAll("button").forEach(b => b.onclick = () => {
+    R.modo = b.dataset.m; R.camH = null; R.camT = null;
+    $("recModo").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+    if(!R.playing && R.ruta){ const cam = dibujar(null, false); view.goTo(cam, { duration: 900 }).catch(() => {}); }
+  });
+  $("recVel").querySelectorAll("button").forEach(b => b.onclick = () => {
+    R.v = +b.dataset.v; $("recVel").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  });
+  $("recAlt").oninput = e => { R.alt = +e.target.value; $("recAltO").textContent = (R.alt >= 0 ? "+" : "") + R.alt + " m"; if(!R.playing && R.ruta) dibujar(null); };
+  document.addEventListener("keydown", e => {
+    if(!R.abierto || !R.ruta || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) && document.activeElement.type !== "range") return;
+    if(e.code === "Space"){ e.preventDefault(); R.playing ? pausar() : reproducir(); }
+    else if(e.code === "ArrowRight"){ R.s = Math.min(R.ruta.total, R.s + 100); if(!R.playing) dibujar(null); e.preventDefault(); }
+    else if(e.code === "ArrowLeft"){ R.s = Math.max(0, R.s - 100); if(!R.playing) dibujar(null); e.preventDefault(); }
+    else if(e.code === "ArrowUp" || e.code === "ArrowDown"){
+      const vs = [...$("recVel").querySelectorAll("button")], i = vs.findIndex(b => b.classList.contains("on"));
+      vs[Math.max(0, Math.min(vs.length-1, i + (e.code === "ArrowUp" ? 1 : -1)))].click(); e.preventDefault();
+    }
+  });
 
   /* ---------- diagnóstico ---------- */
   function renderDiag(){
