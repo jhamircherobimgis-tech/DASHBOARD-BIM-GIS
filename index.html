@@ -163,6 +163,8 @@
   .vel button{background:var(--bg);border:1px solid var(--line-2);border-radius:6px;padding:3px 7px;cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .vel button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
   .alt{display:flex;align-items:center;gap:6px}
+  .luz{background:var(--bg);border:1px solid var(--line-2);border-radius:6px;padding:3px 9px;cursor:pointer;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .luz.on{background:#fff2c6;border-color:#ffe08a;color:#3a2a00;box-shadow:0 0 10px rgba(255,224,138,.55)}
   .alt input{width:90px}
   .rec-info{flex:1;min-width:200px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rec-info b{color:var(--text);font-weight:500}
@@ -270,6 +272,7 @@
           <div class="vel" id="recVel">
             <button data-v="20">20</button><button data-v="40">40</button><button data-v="60" class="on">60</button><button data-v="90">90</button><button data-v="200">200</button><span style="align-self:center;margin-left:2px">km/h</span>
           </div>
+          <button class="luz" id="recLuz" title="Luces del vehículo: Automático (se encienden de tarde/noche) → Encendidas → Apagadas">💡 Luces: Auto</button>
           <div class="alt"><label for="recAlt">Altura cámara</label><input type="range" id="recAlt" min="-10" max="80" value="0"><output id="recAltO" style="font-family:var(--mono)">+0 m</output></div>
           <div class="rec-info" id="recInfo"></div>
         </div>
@@ -399,9 +402,11 @@ require([
   "esri/core/reactiveUtils","esri/geometry/Extent","esri/layers/support/FeatureFilter",
   "esri/request","esri/geometry/Point","esri/geometry/projection",
   "esri/Graphic","esri/layers/GraphicsLayer","esri/symbols/WebStyleSymbol","esri/Camera",
-  "esri/geometry/Multipoint","esri/geometry/SpatialReference","esri/geometry/support/webMercatorUtils"
+  "esri/geometry/Multipoint","esri/geometry/SpatialReference","esri/geometry/support/webMercatorUtils",
+  "esri/geometry/Mesh","esri/geometry/support/MeshMaterialMetallicRoughness","esri/geometry/support/MeshLocalVertexSpace"
 ], (esriConfig, WebScene, SceneView, OAuthInfo, IdentityManager, Home, Measure, Slice, Expand, reactiveUtils, Extent, FeatureFilter, esriRequest, Point, projection,
-    Graphic, GraphicsLayer, WebStyleSymbol, Camera, Multipoint, SpatialReference, webMercatorUtils) => {
+    Graphic, GraphicsLayer, WebStyleSymbol, Camera, Multipoint, SpatialReference, webMercatorUtils,
+    Mesh, MeshMaterialMetallicRoughness, MeshLocalVertexSpace) => {
 
   esriConfig.portalUrl = CONFIG.PORTAL_URL;
   if(CONFIG.APP_ID){
@@ -1083,7 +1088,7 @@ require([
 
   /* =================== RECORRIDO VIRTUAL =================== */
   const R = { abierto:false, rutas:[], ruta:null, s:0, v:60, playing:false, modo:"persecucion", alt:0,
-              gl:null, car:null, mark:null, sym:null, carHead:null, camH:null, camT:null, last:0, hud:0, listo:false };
+              gl:null, car:null, mark:null, sym:null, carHead:null, luces:"auto", glL:null, lastP:null, lastH:0, camH:null, camT:null, last:0, hud:0, listo:false };
 
   async function initRecorrido(){
     if(R.listo) return;
@@ -1098,6 +1103,7 @@ require([
     R.mark = new Graphic({ symbol:{ type:"point-3d", symbolLayers:[{ type:"icon", resource:{ primitive:"circle" }, size:14,
               material:{ color:"#f2b134" }, outline:{ color:"#ffffff", size:2 } }] } });
     R.gl.addMany([R.car, R.mark]);
+    initLuces();
     await construirRutas();
     R.listo = true;
   }
@@ -1312,11 +1318,81 @@ require([
       R.car.symbol = sym; R.carHead = h;
     }
     R.car.geometry = g; R.mark.geometry = g;
+    R.lastP = p; R.lastH = h;
+    actualizarLuces(r, p, h);
     R.mark.visible = R.modo === "dron";
     if(moverCam) view.camera = cam;
     hud(false);
     return cam;
   }
+
+  /* ---- Luces del vehículo: faros, luces traseras y haz de luz sobre la vía ---- */
+  function initLuces(){
+    R.glL = new GraphicsLayer({ title:"Luces del vehículo", listMode:"hide", elevationInfo:{ mode:"relative-to-scene" } });
+    scene.add(R.glL);
+    R.matHaz = new MeshMaterialMetallicRoughness({ color:[255,246,222,1], emissiveColor:[255,236,196], alphaMode:"blend",
+                                                   doubleSided:true, metallic:0, roughness:1 });
+    R.haz = new Graphic({ symbol:{ type:"mesh-3d", symbolLayers:[{ type:"fill", castShadows:false }] } });
+    const icono = (nucleo, halo, tN, tH) => ({ type:"point-3d", symbolLayers:[
+      { type:"icon", resource:{ primitive:"circle" }, size:tH, material:{ color:halo } },
+      { type:"icon", resource:{ primitive:"circle" }, size:tN, material:{ color:nucleo }, outline:{ color:[255,255,255,0.35], size:1 } } ] });
+    R.faros = [0,1].map(() => new Graphic({ symbol: icono([255,253,240,1], [255,236,180,0.28], 7, 24) }));
+    R.stops = [0,1].map(() => new Graphic({ symbol: icono([255,45,35,1], [255,30,20,0.25], 5, 14) }));
+    R.glL.addMany([R.haz, ...R.faros, ...R.stops]);
+  }
+  function lucesActivas(){
+    if(R.luces === "on") return true;
+    if(R.luces === "off") return false;
+    const h = +$("hora").value; return h < 6.25 || h >= 17.75;
+  }
+  function actualizarLuces(r, p, h){
+    if(!R.glL) return;
+    const on = lucesActivas();
+    $("recLuz").classList.toggle("on", on);
+    R.glL.visible = R.abierto && on;
+    if(!on) return;
+    const k = r.k, z0 = r.absZ ? p.z : 0;
+    const rad = h * Math.PI / 180, sn = Math.sin(rad), cs = Math.cos(rad);
+    const at = (f, l, dz) => new Point({ x: p.x + (f*sn + l*cs) / k, y: p.y + (f*cs - l*sn) / k, z: z0 + dz, spatialReference: r.wsr });
+    R.faros[0].geometry = at(2.5, -0.75, 0.75); R.faros[1].geometry = at(2.5, 0.75, 0.75);
+    R.stops[0].geometry = at(-2.55, -0.7, 0.9);  R.stops[1].geometry = at(-2.55, 0.7, 0.9);
+    R.faros.forEach(g => g.visible = R.modo !== "conductor");
+    // Haz: franja que sigue el eje por delante del vehículo, se abre y se desvanece con la distancia
+    const s0 = R.s, filas = [], LARGO = 55;
+    for(let d = 1.5; d <= LARGO; d += 2.5){
+      if(s0 + d > r.total) break;
+      const c = pos(r, s0 + d), hd = rumbo(r, s0 + d, 2, 2) * Math.PI / 180;
+      const ex = (c.x - p.x) * k, ny = (c.y - p.y) * k;
+      const dz = Math.max(-0.12*d, Math.min(0.12*d, c.z - p.z)) + 0.25;
+      const w = 2.2 + d * 0.13, rx = Math.cos(hd), ry = -Math.sin(hd);
+      const a = Math.round(215 * Math.pow(Math.max(0, 1 - d / LARGO), 1.2));
+      filas.push({ pts:[[ex - rx*w/2, ny - ry*w/2, dz], [ex, ny, dz], [ex + rx*w/2, ny + ry*w/2, dz]], a });
+    }
+    if(filas.length < 2){ R.haz.visible = false; return; }
+    const pos3 = [], col = [], caras = [];
+    filas.forEach(f => f.pts.forEach((v, i) => { pos3.push(...v); col.push(255, 244, 214, i === 1 ? f.a : Math.round(f.a * 0.15)); }));
+    for(let i = 0; i < filas.length - 1; i++){
+      const a = i*3, b = (i+1)*3;
+      caras.push(a, a+1, b, a+1, b+1, b,   a+1, a+2, b+1, a+2, b+2, b+1);
+    }
+    try{
+      R.haz.geometry = new Mesh({
+        vertexSpace: new MeshLocalVertexSpace({ origin: [p.x, p.y, z0] }),
+        vertexAttributes: { position: new Float64Array(pos3), color: new Uint8Array(col) },
+        components: [{ faces: new Uint32Array(caras), material: R.matHaz }],
+        spatialReference: r.wsr
+      });
+      R.haz.visible = true;
+    }catch(e){ R.haz.visible = false; console.warn("haz de luz", e); }
+  }
+  function refrescarLuces(){ if(R.abierto && R.ruta && R.lastP && !R.playing) actualizarLuces(R.ruta, R.lastP, R.lastH); }
+  $("recLuz").onclick = () => {
+    R.luces = { auto:"on", on:"off", off:"auto" }[R.luces];
+    $("recLuz").textContent = "💡 Luces: " + { auto:"Auto", on:"Encendidas", off:"Apagadas" }[R.luces];
+    refrescarLuces();
+  };
+  $("amb").addEventListener("input", refrescarLuces);
+  $("amb").addEventListener("click", () => setTimeout(refrescarLuces, 0));
 
   function hud(forzar){
     const now = performance.now(); if(!forzar && now - R.hud < 150) return; R.hud = now;
@@ -1359,6 +1435,7 @@ require([
     $("recRuta").value = r.id;
     $("recSl").max = Math.round(r.total);
     R.gl.elevationInfo = { mode: r.absZ ? "absolute-height" : "relative-to-scene" };
+    if(R.glL) R.glL.elevationInfo = { mode: r.absZ ? "absolute-height" : "relative-to-scene" };
     if(volar){
       const cam = dibujar(null, false);
       await view.goTo(cam, { duration: 1800 }).catch(() => {});
@@ -1377,7 +1454,7 @@ require([
     $("btnRec").textContent = "■ Cerrar recorrido";
     $("recInfo").textContent = "Cargando ejes y vehículo…";
     try{ await initRecorrido(); }catch(e){ console.error(e); toast("Error al iniciar el recorrido: " + e.message); }
-    R.gl.visible = true;
+    R.gl.visible = true; if(R.glL) R.glL.visible = true;
     if(!R.rutas.length){ $("recInfo").textContent = "No se encontraron capas de eje ni progresivas."; return; }
     if(!R.ruta) rutaDeTramo(S.tramo); else { dibujar(null); }
   }
@@ -1385,6 +1462,7 @@ require([
     pausar(); R.abierto = false; $("rec").classList.remove("show"); document.querySelector("main").classList.remove("rec-on");
     $("btnRec").textContent = "▶ Recorrido virtual";
     if(R.gl) R.gl.visible = false;
+    if(R.glL) R.glL.visible = false;
   }
 
   $("btnRec").onclick = abrirRecorrido;
